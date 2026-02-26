@@ -30,10 +30,13 @@ ENV HOSTNAME="0.0.0.0"
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
-# Standalone Next.js output — smallest possible runtime
+# Standalone Next.js output
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
+# Copy full node_modules so external packages (playwright-extra, stealth plugin)
+# and their transitive deps (is-plain-object etc.) are available at runtime
+COPY --from=builder /app/node_modules ./node_modules
 
 # Persistent data directories (mounted as volumes in production)
 RUN mkdir -p /app/skills /app/tools
