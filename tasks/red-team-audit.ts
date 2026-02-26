@@ -1,4 +1,4 @@
-import { BaseTask } from './base-task.ts';
+import { BaseTask } from './base-task';
 
 class RedTeamAuditTask extends BaseTask {
     async execute() {
