@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { pool } from '@/lib/automation/pool'
 
+export const dynamic = 'force-dynamic'
+
 const AUDIT_SITES = [
     { name: 'SannySoft (Core Stealth)', url: 'https://bot.sannysoft.com/' },
     { name: 'BrowserScan (Deep Fingerprint)', url: 'https://www.browserscan.net' },
