@@ -1,0 +1,130 @@
+@import "tailwindcss";
+
+:root {
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 240 10% 3.9%;
+  --card-foreground: 0 0% 98%;
+  --popover: 240 10% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  --primary: 47.9 95.8% 53.1%;
+  /* Modern Gold/Yellow */
+  --primary-foreground: 26 83.3% 14.1%;
+  --secondary: 240 3.7% 15.9%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+  --accent: 240 3.7% 15.9%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --ring: 47.9 95.8% 53.1%;
+  --radius: 0.75rem;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background-color: black;
+    color: white;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    cursor: default;
+  }
+}
+
+@layer utilities {
+  .cyber-grid {
+    background-image: radial-gradient(circle at 2px 2px, rgba(255, 255, 255, 0.05) 1px, transparent 0);
+    background-size: 24px 24px;
+  }
+
+  .glass-card {
+    background: rgba(18, 18, 18, 0.8);
+    backdrop-filter: blur(16px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+  }
+
+  .glow-yellow {
+    box-shadow: 0 0 20px rgba(234, 179, 8, 0.15);
+  }
+
+  .cyber-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .cyber-shimmer::after {
+    content: "";
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: linear-gradient(45deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.03) 50%,
+        transparent 100%);
+    animation: shimmer 10s infinite linear;
+  }
+
+  @keyframes shimmer {
+    from {
+      transform: rotate(0deg);
+    }
+
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .scanline {
+    width: 100%;
+    height: 100px;
+    z-index: 10;
+    background: linear-gradient(0deg, rgba(0, 0, 0, 0) 0%, rgba(255, 255, 255, 0.02) 50%, rgba(0, 0, 0, 0) 100%);
+    opacity: 0.1;
+    position: absolute;
+    bottom: 100%;
+    animation: scanline 8s linear infinite;
+  }
+
+  @keyframes scanline {
+    0% {
+      bottom: 100%;
+    }
+
+    100% {
+      bottom: -100px;
+    }
+  }
+}
+
+/* Custom transitions */
+.transition-glow {
+  transition: box-shadow 0.3s ease-in-out, border-color 0.3s ease-in-out;
+}
+
+.hover-glow:hover {
+  box-shadow: 0 0 15px rgba(234, 179, 8, 0.2);
+  border-color: rgba(234, 179, 8, 0.4);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(234, 179, 8, 0.4);
+}
