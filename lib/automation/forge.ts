@@ -8,7 +8,7 @@ import path from 'path'
 const FORBIDDEN = [
     /require\s*\(/,
     /\bimport\s*\(/,
-    /\bprocess\b/,
+    /\bprocess\s*[.[]/,   // process.env, process['env'] — not the word in comments
     /child_process/,
     /\bexec\s*\(/,
     /\bspawn\s*\(/,
@@ -17,14 +17,22 @@ const FORBIDDEN = [
     /__dirname/,
     /__filename/,
     /\bfs\s*\./,
-    /\bglobal\b/,
-    /\bBuffer\b/,
+    /\bglobal\s*[.[]/,    // global.x or global['x'] — not variable names like globalVar
+    /\bBuffer\s*[.([]/,   // Buffer.from(), Buffer(), new Buffer
 ]
+
+/** Strip JS line/block comments before pattern checking to avoid false positives */
+function stripComments(code: string): string {
+    return code
+        .replace(/\/\/[^\n]*/g, '')        // line comments
+        .replace(/\/\*[\s\S]*?\*\//g, '')  // block comments
+}
 
 function validateExecuteBody(body: string): void {
     if (body.length > 50_000) throw new Error('executeBody exceeds 50,000 char limit')
+    const stripped = stripComments(body)
     for (const pattern of FORBIDDEN) {
-        if (pattern.test(body)) {
+        if (pattern.test(stripped)) {
             throw new Error(`Security violation: forbidden pattern detected in executeBody`)
         }
     }
