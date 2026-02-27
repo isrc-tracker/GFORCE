@@ -4,11 +4,15 @@ export interface ProxyConfig {
     url: string;
     type: 'mobile' | 'residential' | 'datacenter';
     provider: string;
+    failures: number;
+    lastUsed: string;
+    isDead: boolean;
 }
 
 class ProxyManager {
     private proxies: ProxyConfig[] = [];
     private currentIndex = 0;
+    private readonly FAILURE_THRESHOLD = 3;
 
     constructor() {
         this.initialize();
@@ -20,14 +24,16 @@ class ProxyManager {
         const mobile2 = process.env.BRIGHT_DATA_MOBILE_PROXY_URL_2;
         const residential = process.env.RESIDENTIAL_PROXY_URL;
 
+        const base = { failures: 0, lastUsed: new Date().toISOString(), isDead: false };
+
         if (mobile1) {
-            this.proxies.push({ url: mobile1, type: 'mobile', provider: 'bright-data' });
+            this.proxies.push({ ...base, url: mobile1, type: 'mobile', provider: 'bright-data' });
         }
         if (mobile2) {
-            this.proxies.push({ url: mobile2, type: 'mobile', provider: 'bright-data' });
+            this.proxies.push({ ...base, url: mobile2, type: 'mobile', provider: 'bright-data' });
         }
         if (residential) {
-            this.proxies.push({ url: residential, type: 'residential', provider: 'iproyal' });
+            this.proxies.push({ ...base, url: residential, type: 'residential', provider: 'iproyal' });
         }
 
         logger.info(`[ProxyManager] Initialized with ${this.proxies.length} proxies (Mobile: ${mobile2 ? 2 : 1}).`);
@@ -38,35 +44,59 @@ class ProxyManager {
      * If an account has a specific type preference, it tries to satisfy it.
      */
     getProxy(account?: any): ProxyConfig | undefined {
-        if (this.proxies.length === 0) return undefined;
+        const activeProxies = this.proxies.filter(p => !p.isDead);
+        if (activeProxies.length === 0) return undefined;
 
-        const preference = account?.metadata?.proxyType; // 'mobile', 'residential', etc.
+        const preference = account?.metadata?.proxyType;
 
         if (preference) {
-            const matches = this.proxies.filter(p => p.type === preference);
+            const matches = activeProxies.filter(p => p.type === preference);
             if (matches.length > 0) {
-                // Return a random match or round-robin within the type
                 const index = Math.floor(Math.random() * matches.length);
-                return matches[index];
+                const p = matches[index];
+                p.lastUsed = new Date().toISOString();
+                return p;
             }
         }
 
-        // Default: Round Robin across all proxies
-        const proxy = this.proxies[this.currentIndex];
-        this.currentIndex = (this.currentIndex + 1) % this.proxies.length;
+        // Default: Round Robin across active proxies
+        let proxy = activeProxies.find((_, i) => i === (this.currentIndex % activeProxies.length));
+        if (!proxy) proxy = activeProxies[0];
+
+        this.currentIndex = (this.currentIndex + 1) % activeProxies.length;
+        proxy.lastUsed = new Date().toISOString();
 
         logger.info(`[ProxyManager] Rotating to proxy: ${proxy.type} (${proxy.provider})`);
         return proxy;
     }
 
-    /**
-     * Allows adding more proxies dynamically (e.g. from a list)
-     */
+    markFailure(url: string) {
+        const proxy = this.proxies.find(p => p.url === url);
+        if (proxy) {
+            proxy.failures++;
+            if (proxy.failures >= this.FAILURE_THRESHOLD) {
+                proxy.isDead = true;
+                logger.error(`[ProxyManager] 💀 Proxy ${proxy.type} (${proxy.provider}) marked as DEAD after ${proxy.failures} failures.`);
+            }
+        }
+    }
+
+    markSuccess(url: string) {
+        const proxy = this.proxies.find(p => p.url === url);
+        if (proxy) {
+            proxy.failures = 0; // Reset failures on successful use
+        }
+    }
+
     addProxies(urls: string[], type: ProxyConfig['type'], provider: string) {
         for (const url of urls) {
-            this.proxies.push({ url, type, provider });
+            this.proxies.push({
+                url, type, provider,
+                failures: 0,
+                lastUsed: new Date().toISOString(),
+                isDead: false
+            });
         }
-        logger.info(`[ProxyManager] Added ${urls.length} ${type} proxies from ${provider}.`);
     }
 
     getAll(): ProxyConfig[] {

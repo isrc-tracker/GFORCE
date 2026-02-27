@@ -16,7 +16,7 @@ export abstract class BaseSkill implements Skill {
     abstract id: string;
     abstract name: string;
     abstract description: string;
-    abstract execute(ctx: SkillContext, ...args: any[]): Promise<any>;
+    abstract execute(ctx: SkillContext, botToken?: string, chatId?: number, ...args: any[]): Promise<any>;
 
     protected async delay(ms: number) {
         return new Promise(resolve => setTimeout(resolve, ms));

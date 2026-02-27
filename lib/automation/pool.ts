@@ -41,64 +41,83 @@ export class ContextPool {
             return owned < this.contextsPerBrowser;
         });
 
-        if (!browser) {
-            let endpoint = process.env.BRIGHT_DATA_BROWSER_URL;
-            if (endpoint) {
-                const country = account?.metadata?.country || process.env.BRIGHT_DATA_DEFAULT_COUNTRY;
-                if (country) {
-                    // Bright Data allows overriding country via -country-xx suffix in the zone name
-                    endpoint = endpoint.replace('-zone-scraping_browser1', `-zone-scraping_browser1-country-${country}`);
+        const retryLimit = 3;
+        let lastErr: Error | null = null;
+
+        for (let attempt = 1; attempt <= retryLimit; attempt++) {
+            let proxy = proxyManager.getProxy(account);
+            let proxyUrl = proxy?.url;
+
+            try {
+                if (!browser) {
+                    let endpoint = process.env.BRIGHT_DATA_BROWSER_URL;
+                    if (endpoint) {
+                        const country = account?.metadata?.country || process.env.BRIGHT_DATA_DEFAULT_COUNTRY;
+                        if (country) {
+                            endpoint = endpoint.replace('-zone-scraping_browser1', `-zone-scraping_browser1-country-${country}`);
+                        }
+                        console.log(`[Pool] Connecting to Bright Data (Attempt ${attempt}/${retryLimit})${country ? ` [${country}]` : ''}...`);
+                        browser = await (playwright as any).connectOverCDP(endpoint);
+                    } else {
+                        browser = await (playwright as any).launch({ headless: true });
+                    }
+                    this.browsers.push(browser);
                 }
-                console.log(`[Pool] Connecting to Bright Data Scraping Browser${country ? ` (Country: ${country})` : ''}...`);
-                browser = await (playwright as any).connectOverCDP(endpoint);
-            } else {
-                browser = await (playwright as any).launch({ headless: true });
+
+                const profile = getRandomProfile();
+                const contextOptions: any = {
+                    userAgent: profile.userAgent,
+                    viewport: profile.viewport,
+                    deviceScaleFactor: profile.deviceScaleFactor,
+                    extraHTTPHeaders: getHumanHeaders(profile),
+                };
+
+                if (proxyUrl) {
+                    console.log(`[Pool] Using ${proxy?.type} proxy: ${proxy?.provider}`);
+                    const url = new URL(proxyUrl);
+                    contextOptions.proxy = {
+                        server: `http://${url.host}`,
+                        username: url.username,
+                        password: url.password,
+                    };
+                }
+
+                const context = await browser!.newContext(contextOptions);
+                const page = await context.newPage();
+                await applyAdvancedStealth(page);
+
+                // Success! Mark proxy as healthy if we used one
+                if (proxyUrl) proxyManager.markSuccess(proxyUrl);
+
+                if (account?.cookies) {
+                    await context.addCookies(account.cookies);
+                }
+
+                const slot: Slot = { browser: browser!, context, page, inUse: false };
+                this.slots.push(slot);
+                return slot;
+            } catch (err) {
+                lastErr = err instanceof Error ? err : new Error(String(err));
+                console.error(`[Pool] Spawn attempt ${attempt} failed:`, lastErr.message);
+
+                // If it was a proxy issue, mark it as a failure
+                if (proxyUrl && (lastErr.message.includes('proxy') || lastErr.message.includes('ECONN') || lastErr.message.includes('ETIMEDOUT'))) {
+                    proxyManager.markFailure(proxyUrl);
+                }
+
+                // If browser died, remove it from list
+                if (browser && !browser.isConnected()) {
+                    this.browsers = this.browsers.filter(b => b !== browser);
+                    browser = undefined;
+                }
+
+                if (attempt < retryLimit) {
+                    await new Promise(r => setTimeout(r, 1000 * attempt)); // Exponential backoff
+                }
             }
-            this.browsers.push(browser);
         }
 
-        const profile = getRandomProfile();
-        // Use the ProxyManager to handle rotation and preferences
-        const proxy = proxyManager.getProxy(account);
-        const proxyUrl = proxy?.url;
-
-        const contextOptions: any = {
-            userAgent: profile.userAgent,
-            viewport: profile.viewport,
-            deviceScaleFactor: profile.deviceScaleFactor,
-            extraHTTPHeaders: getHumanHeaders(profile),
-        };
-
-        if (proxyUrl) {
-            console.log(`[Pool] Using ${proxy?.type || 'rotated'} proxy for this session...`);
-            const url = new URL(proxyUrl);
-            contextOptions.proxy = {
-                server: `http://${url.host}`,
-                username: url.username,
-                password: url.password,
-            };
-        }
-
-        const context = await browser.newContext(contextOptions);
-
-        // Inject cookies if account is provided
-        if (account?.cookies) {
-            await context.addCookies(account.cookies);
-        }
-
-        let page: Page;
-        try {
-            page = await context.newPage();
-            await applyAdvancedStealth(page);
-        } catch (err) {
-            // Prevent context leak if stealth setup fails
-            await context.close().catch(() => { });
-            throw err;
-        }
-
-        const slot: Slot = { browser, context, page, inUse: false };
-        this.slots.push(slot);
-        return slot;
+        throw lastErr || new Error('Failed to spawn browser slot after multiple attempts');
     }
 
     /**
