@@ -51,7 +51,8 @@ export class DynamicSkill extends BaseSkill {
     ) {
         super()
         validateExecuteBody(executeBody)
-        this.executeFn = new Function('ctx', '...args', `
+        // Explicitly include botToken and chatId in the function scope
+        this.executeFn = new Function('ctx', 'botToken', 'chatId', '...args', `
             return (async () => {
                 const { page, context } = ctx;
                 ${executeBody}
@@ -59,8 +60,8 @@ export class DynamicSkill extends BaseSkill {
         `)
     }
 
-    async execute(ctx: SkillContext, ...args: any[]): Promise<any> {
-        return this.executeFn(ctx, ...args)
+    async execute(ctx: SkillContext, botToken?: string, chatId?: number, ...args: any[]): Promise<any> {
+        return this.executeFn(ctx, botToken, chatId, ...args)
     }
 }
 
@@ -237,20 +238,26 @@ export class ForgeEngine {
 
         const systemPrompt = `You are the G-Force Forge, a specialized AI that generates Playwright browser automation skills.
 Output ONLY a valid JSON object with these exact fields:
-- id: unique kebab-case string, max 64 chars (e.g. "extract-emails")
-- name: human-readable name, max 64 chars
-- description: what this skill does, max 256 chars
+- id: unique kebab-case string (e.g. "extract-emails")
+- name: human-readable name
+- description: what this skill does
 - executeBody: the RAW JavaScript body of an async function.
-  You have access to: page (Playwright Page), context (Playwright BrowserContext), args (array).
+  Variables available to you:
+  - page: Playwright Page object
+  - context: Playwright BrowserContext object
+  - botToken: Telegram Bot Token (if available)
+  - chatId: Telegram Chat ID (if available)
+  - args: Extra arguments array
   FORBIDDEN: require(), import(), process, fs, eval, exec, spawn, child_process, Buffer, global, __dirname, __filename, new Function().
   ONLY use Playwright page/context APIs and standard browser JavaScript.
+  Note: To send a message to the user, you can use a fetch call to the Telegram API using botToken and chatId.
 
 Example:
 {
   "id": "get-page-title",
   "name": "Page Titler",
   "description": "Returns the current page title",
-  "executeBody": "return await page.title();"
+  "executeBody": "const title = await page.title(); return title;"
 }`
 
         const prompt = `Intent: ${safeIntent}\nContext: ${safeContext}\n\nForge the Skill JSON:`
