@@ -6,9 +6,15 @@ export class AutomationEngine {
     private browser: Browser | null = null;
 
     async init() {
-        this.browser = await playwright.launch({
-            headless: true, // Set to false if you want to see it in action
-        });
+        const endpoint = process.env.BRIGHT_DATA_BROWSER_URL;
+        if (endpoint) {
+            console.log(`[Engine] Connecting to Bright Data Scraping Browser...`);
+            this.browser = await (playwright as any).connectOverCDP(endpoint);
+        } else {
+            this.browser = await (playwright as any).launch({
+                headless: true, // Set to false if you want to see it in action
+            });
+        }
     }
 
     async createSession(): Promise<{ context: BrowserContext; page: Page }> {

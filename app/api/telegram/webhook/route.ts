@@ -9,17 +9,17 @@ export const dynamic = 'force-dynamic'
 
 const HELP_TEXT = `*G-Force Remote Commands*
 
-/forge <intent> - Forge a browser automation skill
-/build <intent> - Fabricate standalone software
-/run <skillId> - Execute a saved skill
-/audit - Run stealth fingerprint audit
-/skills - List all saved skills
+/run <skillId> [accountId] [--async] - Execute skill
+/scrape <url> [country] - Fast background scrape
+/jobs - List active background jobs
+/accounts - List all saved accounts
+/stats - Show domain success rates
 /help - Show this message
 
 *Examples:*
-\`/forge scrape top 10 Hacker News titles\`
-\`/run amazon-search-top5-headphones\`
-\`/build Node.js script to monitor URLs\``
+\`/run tiktok-auto-like acc-01\`
+\`/scrape https://tiktok.com us\`
+\`/run reddit-post acc-02 --async\``
 
 function isAllowed(userId: number): boolean {
     const allowed = process.env.TELEGRAM_ALLOWED_IDS
@@ -48,7 +48,7 @@ async function handleCommand(chatId: number, text: string): Promise<void> {
 
     if (lower === '/audit') {
         await sendMessage(chatId, '`[AUDIT]` Running stealth fingerprint audit... (60-90s)')
-        const slot = await pool.acquire(90_000)
+        const slot = await pool.acquire({ timeoutMs: 90_000 })
         const results: Array<{ site: string; status: 'pass' | 'fail'; title?: string; error?: string }> = []
         const sites = [
             { name: 'SannySoft', url: 'https://bot.sannysoft.com/' },
@@ -97,26 +97,95 @@ async function handleCommand(chatId: number, text: string): Promise<void> {
         return
     }
 
-    if (lower.startsWith('/run ')) {
-        const skillId = trimmed.slice(5).trim()
-        if (!skillId) {
-            await sendMessage(chatId, 'Usage: `/run <skillId>`\n\nGet skill IDs with `/skills`')
+    if (lower === '/accounts') {
+        const { loadAllAccounts } = await import('@/lib/automation/accounts')
+        const accounts = await loadAllAccounts()
+        if (accounts.length === 0) {
+            await sendMessage(chatId, 'No accounts added yet. Add JSON files to the `accounts/` folder.')
             return
         }
 
-        await sendMessage(chatId, `\`[EXEC]\` Running skill \`${safeInline(skillId, 96)}\`...`)
+        const list = accounts
+            .map((a, i) => `${i + 1}. \`${safeInline(a.id, 96)}\` - *${safeInline(a.platform, 32)}* (${a.status})\n   ${a.username ? `@${safeInline(a.username, 64)}` : 'No username'}`)
+            .join('\n')
+
+        await sendMessage(chatId, `*Account Pool (${accounts.length})*\n\n${list}`)
+        return
+    }
+
+    if (lower === '/jobs') {
+        const { getJob } = await import('@/lib/automation/jobs')
+        // In a real app, you'd iterate the jobs Map, but for this demo:
+        await sendMessage(chatId, `*Active Job Queue*\nTo check a specific job, use \`/job <id>\` (coming soon). Check \`/stats\` for domain health.`)
+        return
+    }
+
+    if (lower === '/stats') {
+        const { Monitor } = await import('@/lib/automation/monitor')
+        const stats = Monitor.getAllStats()
+        if (stats.length === 0) {
+            await sendMessage(chatId, 'No session data collected yet.')
+            return
+        }
+
+        const list = stats
+            .map(s => {
+                const total = s.successCount + s.failureCount
+                const rate = (s.successCount / total) * 100
+                const status = s.throttled ? '❌ THROTTLED' : (rate < 95 ? '⚠️ WARNING' : '✅ HEALTHY')
+                return `*${s.domain}*: ${rate.toFixed(1)}% (${s.successCount}/${total})\nStatus: ${status}`
+            })
+            .join('\n\n')
+
+        await sendMessage(chatId, `*Domain Health Monitor (Min 90% Success)*\n\n${list}`)
+        return
+    }
+
+    if (lower.startsWith('/run ')) {
+        const args = trimmed.slice(5).trim().split(/\s+/)
+        const skillId = args[0]
+        const accountId = args[1]
+        const isAsync = trimmed.includes('--async')
+
+        if (!skillId) {
+            await sendMessage(chatId, 'Usage: `/run <skillId> [accountId] [--async]`\n\nGet IDs with `/skills` and `/accounts`')
+            return
+        }
 
         await ensureSkillsLoaded()
         const skill = skillRegistry.get(skillId)
         if (!skill) {
-            await sendMessage(chatId, `FAIL Skill \`${safeInline(skillId, 96)}\` not found. Use \`/skills\` to list available skills.`)
+            await sendMessage(chatId, `FAIL Skill \`${safeInline(skillId, 96)}\` not found.`)
             return
         }
 
-        const slot = await pool.acquire(60_000)
+        const domain = skillId.includes('tiktok') ? 'tiktok.com' :
+            skillId.includes('reddit') ? 'reddit.com' :
+                skillId.includes('youtube') ? 'youtube.com' : 'general';
+
+        if (isAsync) {
+            const { createJob } = await import('@/lib/automation/jobs')
+            const jobId = await createJob(skill as any, accountId, chatId)
+            await sendMessage(chatId, `\`[ASYNC]\` Job started! ID: \`${jobId}\` (Skill: \`${skillId}\`)\nI will notify you when it's done.`)
+            return
+        }
+
+        const { Monitor } = await import('@/lib/automation/monitor')
+        if (Monitor.isThrottled(domain)) {
+            await sendMessage(chatId, `FAIL Execution blocked. Domain \`${domain}\` is throttled (Success rate < 90%).`)
+            return
+        }
+
+        await sendMessage(chatId, `\`[EXEC]\` Running \`${safeInline(skillId, 96)}\`${accountId ? ` with account \`${safeInline(accountId, 64)}\`` : ''}...`)
+
+        const slot = await pool.acquire({ accountId, timeoutMs: 60_000 })
         try {
+            const { Monitor } = await import('@/lib/automation/monitor')
             const result = await skill.execute({ page: slot.page, context: slot.context })
             const json = typeof result === 'string' ? result : (JSON.stringify(result, null, 2) ?? String(result))
+
+            Monitor.recordResult(domain, true)
+
             const preview = json.length > 3000
                 ? `${safeCodeBlock(json, 3000)}\n...(truncated)`
                 : safeCodeBlock(json, 3000)
@@ -126,9 +195,39 @@ async function handleCommand(chatId: number, text: string): Promise<void> {
                 `OK *${safeInline(skill.name, 64)}* complete\n\n\`\`\`\n${preview}\n\`\`\``
             )
         } catch (err) {
+            const { Monitor } = await import('@/lib/automation/monitor')
+            Monitor.recordResult(domain, false)
             await sendMessage(chatId, `FAIL Execution failed: ${safeInline((err as Error).message, 200)}`)
         } finally {
             await slot.release()
+        }
+        return
+    }
+
+    if (lower.startsWith('/scrape ')) {
+        const args = trimmed.slice(8).trim().split(/\s+/)
+        const url = args[0]
+        const country = args[1]
+
+        if (!url) {
+            await sendMessage(chatId, 'Usage: `/scrape <url> [country]`\nExample: `/scrape https://tiktok.com us`')
+            return
+        }
+
+        await sendMessage(chatId, `\`[SCRAPE]\` Submitting async unlocker request for \`${url}\`...`)
+
+        try {
+            const { submitAsyncScraping } = await import('@/lib/automation/bright-data')
+            const { registerExternalJob } = await import('@/lib/automation/jobs')
+
+            const responseId = await submitAsyncScraping({ url, country })
+
+            // Register it so the webhook knows who to notify
+            registerExternalJob(responseId, url, chatId)
+
+            await sendMessage(chatId, `\`[ASYNC]\` Request accepted. Response ID: \`${responseId}\`\nI will notify you when the data arrives at our webhook.`)
+        } catch (err: any) {
+            await sendMessage(chatId, `FAIL Scrape submission failed: ${err.message}`)
         }
         return
     }
@@ -196,7 +295,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     handleCommand(chatId, text).catch(err => {
         console.error('[Telegram] command error:', err)
-        sendMessage(chatId, `FAIL Error: ${safeInline((err as Error).message, 200)}`).catch(() => {})
+        sendMessage(chatId, `FAIL Error: ${safeInline((err as Error).message, 200)}`).catch(() => { })
     })
 
     return new NextResponse('ok')

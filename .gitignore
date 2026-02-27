@@ -7,3 +7,4 @@ nginx/certs/
 /skills/
 /tools/
 *.log
+accounts/
