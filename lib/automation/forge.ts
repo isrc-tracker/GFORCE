@@ -244,10 +244,8 @@ Output ONLY a valid JSON object with these exact fields:
 - id: unique kebab-case string (e.g. "extract-emails")
 - name: human-readable name
 - description: what this skill does
-- executeBody: the RAW JavaScript body of an async function. 
-
-  CRITICAL GUIDELINES for executeBody:
   - **Context Variables**: Use \`page\`, \`context\`, \`botToken\`, \`chatId\`, and \`args\`.
+  - **Content Quality**: When scraping news (like HackerNews or TechCrunch), explicitly EXCLUDE job postings, "Show HN", "Launch HN", and sponsored links unless the user specifically asks for them. Focus on actual articles, technical discussions, and news.
   - **Robust Data Fetching**: When fetching data or using \`page.evaluate\`, ALWAYS check if the response is actually valid JSON/data before parsing. If a site returns HTML (e.g. starts with \`<!DOCTYPE\` or \`<html\`), it means you are likely blocked. DO NOT attempt to parse it as JSON.
   - **Telegram Reporting**: Use the provided \`botToken\` and \`chatId\` to send status updates and the final summary via Telegram fetch calls.
   - **Error Handling**: Wrap critical blocks in try-catch. Notify the user via Telegram if scraping fails.
@@ -263,6 +261,8 @@ Example:
 }`
 
         const prompt = `Intent: ${safeIntent}\nContext: ${safeContext}\n\nForge the Skill JSON:`
+        const botToken = process.env.TELEGRAM_BOT_TOKEN
+        const chatId = process.env.TELEGRAM_CHAT_ID ? Number(process.env.TELEGRAM_CHAT_ID) : undefined
 
         try {
             const response = await executeWithClaude(prompt, systemPrompt)

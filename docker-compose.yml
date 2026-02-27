@@ -11,6 +11,10 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GFORCE_API_KEY=${GFORCE_API_KEY}
       - NEXT_PUBLIC_GFORCE_API_KEY=${GFORCE_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET}
+      - TELEGRAM_ALLOWED_IDS=${TELEGRAM_ALLOWED_IDS}
     volumes:
       # Persist forged skills and fabricated software across deploys
       - skills_data:/app/skills
