@@ -210,23 +210,32 @@ function parseJsonObjectFromModel(response: string): any {
     const fenced = matches.length > 0 ? matches.map(m => m[1].trim()) : []
     const pools = fenced.length > 0 ? [...fenced, trimmed] : [trimmed]
 
+    let bestCandidate: any = null
     let lastErr: Error | null = null
 
     for (const pool of pools) {
         for (const candidate of extractJsonObjectCandidates(pool)) {
             try {
-                return JSON.parse(candidate)
+                const parsed = JSON.parse(candidate)
+                if (parsed.executeBody || parsed.execute_body || parsed.code || parsed.script) {
+                    return parsed // Found the perfect one
+                }
+                if (!bestCandidate) bestCandidate = parsed
             } catch (err) {
-                lastErr = err as Error
-            }
-
-            try {
-                return JSON.parse(escapeControlCharsInJsonStrings(candidate))
-            } catch (err) {
-                lastErr = err as Error
+                try {
+                    const parsed = JSON.parse(escapeControlCharsInJsonStrings(candidate))
+                    if (parsed.executeBody || parsed.execute_body || parsed.code || parsed.script) {
+                        return parsed
+                    }
+                    if (!bestCandidate) bestCandidate = parsed
+                } catch (innerErr) {
+                    lastErr = innerErr as Error
+                }
             }
         }
     }
+
+    if (bestCandidate) return bestCandidate
 
     if (!lastErr) {
         throw new Error('No JSON found in Forge response')
