@@ -301,7 +301,7 @@ Example:
             // Smarter field mapping with fallbacks
             const body = data.executeBody || data.execute_body || data.code || data.script || data.automation_code
             let id = data.id || data.skillId || data.skill_id
-            let name = data.name || data.skillName || data.skill_name || intent.slice(0, 32)
+            let nameMeta = data.name || data.skillName || data.skill_name || intent.slice(0, 32)
             let desc = data.description || data.desc || data.about
 
             if (!body) {
@@ -313,31 +313,32 @@ Example:
 
             // Fallbacks for metadata if code is present
             if (!id) id = `skill-${Math.random().toString(36).slice(2, 8)}`
-            if (!name) name = `Forged Skill ${id}`
+            if (!nameMeta) nameMeta = `Forged Skill ${id}`
             if (!desc) desc = `AI-generated skill for: ${safeIntent}`
 
-            data.id = id
-            data.name = name
-            data.description = desc
-            data.executeBody = body
-
             // Sanitize ID — no path traversal or injection
-            data.id = String(data.id).replace(/[^\w\-]/g, '-').toLowerCase().slice(0, 64)
+            const sanitizedId = String(id).replace(/[^\w\-]/g, '-').toLowerCase().slice(0, 64)
 
-            // validateExecuteBody runs inside DynamicSkill constructor
-            const skill = new DynamicSkill(data.id, data.name, data.description, data.executeBody)
-            skillRegistry.register(skill)
+            try {
+                const skill = new DynamicSkill(sanitizedId, nameMeta, desc, body)
+                skillRegistry.register(skill)
 
-            const stored: StoredSkill = {
-                id: skill.id,
-                name: skill.name,
-                description: skill.description,
-                executeBody: data.executeBody,
-                createdAt: new Date().toISOString(),
+                const stored: StoredSkill = {
+                    id: skill.id,
+                    name: skill.name,
+                    description: skill.description,
+                    executeBody: body,
+                    createdAt: new Date().toISOString(),
+                }
+                await saveSkill(stored)
+                console.log(`[Forge] ✅ Skill '${skill.name}' validated, registered, persisted.`)
+                return skill
+            } catch (err) {
+                console.error('[Forge] ❌ Validation or Registration Failed:', (err as Error).message)
+                console.log('--- RAW AI RESPONSE (FAILED VALIDATION) ---')
+                console.log(response)
+                throw err
             }
-            await saveSkill(stored)
-            console.log(`[Forge] ✅ Skill '${skill.name}' validated, registered, persisted.`)
-            return skill
         } catch (err) {
             const msg = (err as Error).message
             console.error('[Forge] ❌ Blacksmithing failed:', msg)
