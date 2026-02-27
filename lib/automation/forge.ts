@@ -51,13 +51,13 @@ export class DynamicSkill extends BaseSkill {
     ) {
         super()
         validateExecuteBody(executeBody)
-        // Explicitly include botToken and chatId in the function scope
-        this.executeFn = new Function('ctx', 'botToken', 'chatId', '...args', `
-            return (async () => {
-                const { page, context } = ctx;
-                ${executeBody}
-            })();
-        `)
+        // Use safe string concatenation to avoid template literal injection from executeBody
+        const body =
+            'return (async () => {\n' +
+            '    const { page, context } = ctx;\n' +
+            executeBody + '\n' +
+            '})();'
+        this.executeFn = new Function('ctx', 'botToken', 'chatId', '...args', body)
     }
 
     async execute(ctx: SkillContext, botToken?: string, chatId?: number, ...args: any[]): Promise<any> {
@@ -196,7 +196,10 @@ function escapeControlCharsInJsonStrings(input: string): string {
 
 function parseJsonObjectFromModel(response: string): any {
     const trimmed = response.replace(/^\uFEFF/, '').trim()
-    const fenced = Array.from(trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)).map(m => m[1].trim())
+    // Robustly find JSON blocks with or without labels
+    const jsonRegex = /```(?:json)?\s*([\s\S]*?)```/gi
+    const matches = Array.from(trimmed.matchAll(jsonRegex))
+    const fenced = matches.length > 0 ? matches.map(m => m[1].trim()) : []
     const pools = fenced.length > 0 ? [...fenced, trimmed] : [trimmed]
 
     let lastErr: Error | null = null
@@ -241,23 +244,22 @@ Output ONLY a valid JSON object with these exact fields:
 - id: unique kebab-case string (e.g. "extract-emails")
 - name: human-readable name
 - description: what this skill does
-- executeBody: the RAW JavaScript body of an async function.
-  Variables available to you:
-  - page: Playwright Page object
-  - context: Playwright BrowserContext object
-  - botToken: Telegram Bot Token (if available)
-  - chatId: Telegram Chat ID (if available)
-  - args: Extra arguments array
-  FORBIDDEN: require(), import(), process, fs, eval, exec, spawn, child_process, Buffer, global, __dirname, __filename, new Function().
-  ONLY use Playwright page/context APIs and standard browser JavaScript.
-  Note: To send a message to the user, you can use a fetch call to the Telegram API using botToken and chatId.
+- executeBody: the RAW JavaScript body of an async function. 
+
+  CRITICAL GUIDELINES for executeBody:
+  - **Context Variables**: Use \`page\`, \`context\`, \`botToken\`, \`chatId\`, and \`args\`.
+  - **Robust Data Fetching**: When fetching data or using \`page.evaluate\`, ALWAYS check if the response is actually valid JSON/data before parsing. If a site returns HTML (e.g. starts with \`<!DOCTYPE\` or \`<html\`), it means you are likely blocked. DO NOT attempt to parse it as JSON.
+  - **Telegram Reporting**: Use the provided \`botToken\` and \`chatId\` to send status updates and the final summary via Telegram fetch calls.
+  - **Error Handling**: Wrap critical blocks in try-catch. Notify the user via Telegram if scraping fails.
+  - **Security**: FORBIDDEN: require(), import(), process, fs, eval, exec, spawn, child_process, Buffer, global, __dirname, __filename, new Function().
+  - **Output**: ONLY use Playwright page/context APIs and standard browser JavaScript. No external helper functions.
 
 Example:
 {
   "id": "get-page-title",
   "name": "Page Titler",
   "description": "Returns the current page title",
-  "executeBody": "const title = await page.title(); return title;"
+  "executeBody": "try { const title = await page.title(); return title; } catch (e) { console.error(e); }"
 }`
 
         const prompt = `Intent: ${safeIntent}\nContext: ${safeContext}\n\nForge the Skill JSON:`
@@ -265,9 +267,19 @@ Example:
         try {
             const response = await executeWithClaude(prompt, systemPrompt)
             const data = parseJsonObjectFromModel(response)
-            if (!data.id || !data.name || !data.description || !data.executeBody) {
+            const body = data.executeBody || data.execute_body || data.code
+            const id = data.id || data.skillId
+            const name = data.name || data.skillName
+            const desc = data.description || data.desc
+
+            if (!id || !name || !desc || !body) {
                 throw new Error('Incomplete skill schema in AI response')
             }
+
+            data.id = id
+            data.name = name
+            data.description = desc
+            data.executeBody = body
 
             // Sanitize ID — no path traversal or injection
             data.id = String(data.id).replace(/[^\w\-]/g, '-').slice(0, 64)
@@ -312,11 +324,11 @@ Output ONLY a valid JSON object with these exact fields:
 - filename: file name with appropriate extension (.ts, .js, .py, .sh, etc.)
 - description: one-sentence description of what this tool does
 - code: the COMPLETE source code as a string. Include all imports. Handle errors. The code must be runnable as-is.
-
-Supported runtimes: Node.js (TypeScript via tsx, or plain JS), Python 3, Bash.
+  - **Robustness**: Always handle potential network errors, non-JSON responses from APIs, and malformed data. Use try-catch blocks and explicit response validation.
+  - **Completeness**: No placeholders. No TODOs.
 Available packages (Node.js): axios, playwright, zod, @anthropic-ai/sdk, openai, cheerio, fs, path, crypto, http, https.
 
-Write clean, complete, commented code. No placeholders. No TODOs. Make it fully functional.
+Write clean, complete, commented code. Make it fully functional.
 
 Example:
 {
