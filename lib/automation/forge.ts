@@ -57,7 +57,15 @@ export class DynamicSkill extends BaseSkill {
             '    const { page, context } = ctx;\n' +
             executeBody + '\n' +
             '})();'
-        this.executeFn = new Function('ctx', 'botToken', 'chatId', '...args', body)
+        try {
+            this.executeFn = new Function('ctx', 'botToken', 'chatId', '...args', body)
+        } catch (err) {
+            console.error('[Forge] CRITICAL: Invalid code generated in executeBody')
+            console.error('--- START FAILED BODY ---')
+            console.error(body)
+            console.error('--- END FAILED BODY ---')
+            throw err
+        }
     }
 
     async execute(ctx: SkillContext, botToken?: string, chatId?: number, ...args: any[]): Promise<any> {
@@ -244,20 +252,21 @@ Output ONLY a valid JSON object with these exact fields:
 - id: unique kebab-case string (e.g. "extract-emails")
 - name: human-readable name
 - description: what this skill does
+- executeBody: the RAW JavaScript body of an async function.
+
+  CRITICAL GUIDELINES for executeBody:
   - **Context Variables**: Use \`page\`, \`context\`, \`botToken\`, \`chatId\`, and \`args\`.
-  - **Content Quality**: When scraping news (like HackerNews or TechCrunch), explicitly EXCLUDE job postings, "Show HN", "Launch HN", and sponsored links unless the user specifically asks for them. Focus on actual articles, technical discussions, and news.
-  - **Robust Data Fetching**: When fetching data or using \`page.evaluate\`, ALWAYS check if the response is actually valid JSON/data before parsing. If a site returns HTML (e.g. starts with \`<!DOCTYPE\` or \`<html\`), it means you are likely blocked. DO NOT attempt to parse it as JSON.
-  - **Telegram Reporting**: Use the provided \`botToken\` and \`chatId\` to send status updates and the final summary via Telegram fetch calls.
-  - **Error Handling**: Wrap critical blocks in try-catch. Notify the user via Telegram if scraping fails.
-  - **Security**: FORBIDDEN: require(), import(), process, fs, eval, exec, spawn, child_process, Buffer, global, __dirname, __filename, new Function().
-  - **Output**: ONLY use Playwright page/context APIs and standard browser JavaScript. No external helper functions.
+  - **Content Quality**: When scraping news, explicitly EXCLUDE job postings and ads.
+  - **Robust Data Fetching**: ALWAYS verify response types before parsing.
+  - **Telegram Reporting**: Use the provided \`botToken\` and \`chatId\` to send updates.
+  - **Error Handling**: Use try-catch blocks everywhere.
 
 Example:
 {
-  "id": "get-page-title",
-  "name": "Page Titler",
-  "description": "Returns the current page title",
-  "executeBody": "try { const title = await page.title(); return title; } catch (e) { console.error(e); }"
+  "id": "get-title",
+  "name": "Titler",
+  "description": "Gets page title",
+  "executeBody": "try { return await page.title(); } catch (e) { console.error(e); }"
 }`
 
         const prompt = `Intent: ${safeIntent}\nContext: ${safeContext}\n\nForge the Skill JSON:`
@@ -324,9 +333,11 @@ Output ONLY a valid JSON object with these exact fields:
 - filename: file name with appropriate extension (.ts, .js, .py, .sh, etc.)
 - description: one-sentence description of what this tool does
 - code: the COMPLETE source code as a string. Include all imports. Handle errors. The code must be runnable as-is.
-  - **Robustness**: Always handle potential network errors, non-JSON responses from APIs, and malformed data. Use try-catch blocks and explicit response validation.
-  - **Completeness**: No placeholders. No TODOs.
-Available packages (Node.js): axios, playwright, zod, @anthropic-ai/sdk, openai, cheerio, fs, path, crypto, http, https.
+
+CRITICAL GUIDELINES:
+- **Robustness**: Always handle potential network errors, non-JSON responses from APIs, and malformed data. Use try-catch blocks and explicit response validation.
+- **Completeness**: No placeholders. No TODOs.
+- **Available packages (Node.js)**: axios, playwright, zod, @anthropic-ai/sdk, openai, cheerio, fs, path, crypto, http, https.
 
 Write clean, complete, commented code. Make it fully functional.
 
