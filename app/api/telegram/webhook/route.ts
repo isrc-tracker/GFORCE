@@ -10,6 +10,9 @@ export const dynamic = 'force-dynamic'
 const HELP_TEXT = `*G-Force Remote Commands*
 
 /run <skillId> [accountId] [--async] - Execute skill
+/schedule <skillId> <mins> [acc] - Schedule a task
+/unschedule <id> - Stop a scheduled task
+/schedules - List all active schedules
 /scrape <url> [country] - Fast background scrape
 /jobs - List active background jobs
 /accounts - List all saved accounts
@@ -253,6 +256,63 @@ async function handleCommand(chatId: number, text: string): Promise<void> {
         return
     }
 
+    if (lower.startsWith('/schedule ')) {
+        const { scheduler } = await import('@/lib/automation/scheduler')
+        const args = trimmed.slice(10).trim().split(/\s+/)
+        const skillId = args[0]
+        const intervalMins = parseInt(args[1])
+        const accountId = args[2]
+
+        if (!skillId || isNaN(intervalMins)) {
+            await sendMessage(chatId, 'Usage: `/schedule <skillId> <interval_minutes> [accountId]`')
+            return
+        }
+
+        await ensureSkillsLoaded()
+        const skill = skillRegistry.get(skillId)
+        if (!skill) {
+            await sendMessage(chatId, `FAIL Skill \`${safeInline(skillId, 96)}\` not found.`)
+            return
+        }
+
+        const id = await scheduler.addSchedule(skillId, intervalMins, chatId, accountId)
+        await sendMessage(chatId, `✅ *Schedule Added*\nID: \`${id}\`\nSkill: \`${skillId}\`\nInterval: ${intervalMins}m\nAccount: ${accountId || 'None'}`)
+        return
+    }
+
+    if (lower.startsWith('/unschedule ')) {
+        const { scheduler } = await import('@/lib/automation/scheduler')
+        const id = trimmed.slice(12).trim()
+        if (!id) {
+            await sendMessage(chatId, 'Usage: `/unschedule <scheduleId>`')
+            return
+        }
+
+        const ok = await scheduler.stopSchedule(id)
+        if (ok) {
+            await sendMessage(chatId, `✅ Schedule \`${id}\` stopped and removed.`)
+        } else {
+            await sendMessage(chatId, `FAIL Schedule \`${id}\` not found.`)
+        }
+        return
+    }
+
+    if (lower === '/schedules') {
+        const { scheduler } = await import('@/lib/automation/scheduler')
+        const list = scheduler.getSchedules()
+        if (list.length === 0) {
+            await sendMessage(chatId, 'No active schedules.')
+            return
+        }
+
+        const lines = list.map(s =>
+            `ID: \`${s.id}\`\nSkill: \`${s.skillId}\`\nFreq: ${s.intervalMs / 60000}m\nLast: ${s.lastRun ? new Date(s.lastRun).toLocaleTimeString() : 'Never'}`
+        ).join('\n\n')
+
+        await sendMessage(chatId, `*Automation Schedules*\n\n${lines}`)
+        return
+    }
+
     if (lower.startsWith('/build ')) {
         const intent = trimmed.slice(7).trim()
         if (!intent) {
@@ -279,6 +339,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (expected && secret !== expected) {
         return new NextResponse(null, { status: 403 })
     }
+
+    const { scheduler } = await import('@/lib/automation/scheduler')
+    scheduler.start().catch(err => console.error('[Scheduler] Boot error:', err))
 
     const update = await req.json().catch(() => null)
     if (!update?.message?.text || !update?.message?.chat?.id) {
