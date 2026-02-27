@@ -16,8 +16,8 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN npm ci
 
 COPY . .
-# Explicitly include tools if not caught by bulk copy
-COPY tools ./tools
+# Explicitly include tasks if not caught by bulk copy
+COPY tasks ./tasks
 ENV NODE_ENV=production
 RUN npm run build
 
@@ -40,7 +40,7 @@ COPY --from=builder /app/public ./public
 # and their transitive deps (is-plain-object etc.) are available at runtime
 COPY --from=builder /app/node_modules ./node_modules
 
-COPY --from=builder /app/tools ./tools
+COPY --from=builder /app/tasks ./tasks
 RUN mkdir -p /app/skills
 
 EXPOSE 3000
