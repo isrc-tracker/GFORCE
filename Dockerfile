@@ -38,8 +38,8 @@ COPY --from=builder /app/public ./public
 # and their transitive deps (is-plain-object etc.) are available at runtime
 COPY --from=builder /app/node_modules ./node_modules
 
-# Persistent data directories (mounted as volumes in production)
-RUN mkdir -p /app/skills /app/tools
+COPY --from=builder /app/tools ./tools
+RUN mkdir -p /app/skills
 
 EXPOSE 3000
 CMD ["node", "server.js"]
