@@ -16,6 +16,8 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN npm ci
 
 COPY . .
+# Explicitly include tools if not caught by bulk copy
+COPY tools ./tools
 ENV NODE_ENV=production
 RUN npm run build
 
