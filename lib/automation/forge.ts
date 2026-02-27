@@ -101,7 +101,7 @@ export class ForgeEngine {
      * Blacksmith — forge a new browser-automation Skill from a natural-language intent.
      * Validates AI-generated code before executing. Persists to disk automatically.
      */
-    static async blacksmith(intent: string, context?: string): Promise<Skill | null> {
+    static async blacksmith(intent: string, context?: string): Promise<Skill> {
         await ensureSkillsLoaded()
 
         const safeIntent = sanitizeInput(intent, 2000)
@@ -159,7 +159,7 @@ Example:
         } catch (err) {
             const msg = (err as Error).message
             console.error('[Forge] ❌ Blacksmithing failed:', msg.startsWith('Security') ? 'code validation rejected' : msg)
-            return null
+            throw err
         }
     }
 
@@ -170,7 +170,7 @@ Example:
     static async fabricate(
         intent: string,
         context?: string
-    ): Promise<{ filename: string; code: string; description: string } | null> {
+    ): Promise<{ filename: string; code: string; description: string }> {
         const safeIntent = sanitizeInput(intent, 3000)
         const safeContext = sanitizeInput(context ?? '', 1000)
 
@@ -221,7 +221,7 @@ Example:
             }
         } catch (err) {
             console.error('[Forge] ❌ Fabrication failed:', (err as Error).message)
-            return null
+            throw err
         }
     }
 }

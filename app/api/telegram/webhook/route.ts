@@ -78,14 +78,14 @@ async function handleCommand(chatId: number, text: string): Promise<void> {
         const intent = text.slice(7).trim()
         if (!intent) { await sendMessage(chatId, 'Usage: `/forge <intent>`'); return }
         await sendMessage(chatId, `\`[FORGE]\` Blacksmithing: _${intent}_...`)
-        const skill = await ForgeEngine.blacksmith(intent)
-        if (!skill) {
-            await sendMessage(chatId, '❌ Forge failed. Try a different intent.')
-            return
+        try {
+            const skill = await ForgeEngine.blacksmith(intent)
+            await sendMessage(chatId,
+                `✅ *Skill Forged*\n\n*Name:* ${skill.name}\n*ID:* \`${skill.id}\`\n*Description:* ${skill.description}\n\nDownload: https://gforce.run/api/skills/${skill.id}/download`
+            )
+        } catch (err) {
+            await sendMessage(chatId, `❌ Forge failed: ${(err as Error).message}`)
         }
-        await sendMessage(chatId,
-            `✅ *Skill Forged*\n\n*Name:* ${skill.name}\n*ID:* \`${skill.id}\`\n*Description:* ${skill.description}\n\nDownload: https://gforce.run/api/skills/${skill.id}/download`
-        )
         return
     }
 
@@ -93,12 +93,12 @@ async function handleCommand(chatId: number, text: string): Promise<void> {
         const intent = text.slice(7).trim()
         if (!intent) { await sendMessage(chatId, 'Usage: `/build <intent>`'); return }
         await sendMessage(chatId, `\`[BUILD]\` Fabricating: _${intent}_...`)
-        const result = await ForgeEngine.fabricate(intent)
-        if (!result) {
-            await sendMessage(chatId, '❌ Fabrication failed. Try a different intent.')
-            return
+        try {
+            const result = await ForgeEngine.fabricate(intent)
+            await sendDocument(chatId, result.filename, result.code, `✅ ${result.description}`)
+        } catch (err) {
+            await sendMessage(chatId, `❌ Build failed: ${(err as Error).message}`)
         }
-        await sendDocument(chatId, result.filename, result.code, `✅ ${result.description}`)
         return
     }
 
