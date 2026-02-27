@@ -96,6 +96,132 @@ function sanitizeInput(s: string, maxLen: number): string {
     return s.slice(0, maxLen).replace(/[<>]/g, '')
 }
 
+function findBalancedObjectEnd(text: string, start: number): number {
+    let depth = 0
+    let inString = false
+    let escaped = false
+
+    for (let i = start; i < text.length; i++) {
+        const ch = text[i]
+
+        if (inString) {
+            if (escaped) {
+                escaped = false
+                continue
+            }
+            if (ch === '\\') {
+                escaped = true
+                continue
+            }
+            if (ch === '"') {
+                inString = false
+            }
+            continue
+        }
+
+        if (ch === '"') {
+            inString = true
+            continue
+        }
+        if (ch === '{') {
+            depth++
+            continue
+        }
+        if (ch === '}') {
+            depth--
+            if (depth === 0) return i
+        }
+    }
+
+    return -1
+}
+
+function extractJsonObjectCandidates(text: string): string[] {
+    const out: string[] = []
+    for (let i = 0; i < text.length; i++) {
+        if (text[i] !== '{') continue
+        const end = findBalancedObjectEnd(text, i)
+        if (end !== -1) {
+            out.push(text.slice(i, end + 1))
+        }
+    }
+    return out
+}
+
+function escapeControlCharsInJsonStrings(input: string): string {
+    let out = ''
+    let inString = false
+    let escaped = false
+
+    for (let i = 0; i < input.length; i++) {
+        const ch = input[i]
+
+        if (inString) {
+            if (escaped) {
+                out += ch
+                escaped = false
+                continue
+            }
+            if (ch === '\\') {
+                out += ch
+                escaped = true
+                continue
+            }
+            if (ch === '"') {
+                out += ch
+                inString = false
+                continue
+            }
+
+            const code = ch.charCodeAt(0)
+            if (code <= 0x1f) {
+                if (ch === '\n') out += '\\n'
+                else if (ch === '\r') out += '\\r'
+                else if (ch === '\t') out += '\\t'
+                else if (ch === '\b') out += '\\b'
+                else if (ch === '\f') out += '\\f'
+                else out += `\\u${code.toString(16).padStart(4, '0')}`
+                continue
+            }
+        } else if (ch === '"') {
+            inString = true
+        }
+
+        out += ch
+    }
+
+    return out
+}
+
+function parseJsonObjectFromModel(response: string): any {
+    const trimmed = response.replace(/^\uFEFF/, '').trim()
+    const fenced = Array.from(trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)).map(m => m[1].trim())
+    const pools = fenced.length > 0 ? [...fenced, trimmed] : [trimmed]
+
+    let lastErr: Error | null = null
+
+    for (const pool of pools) {
+        for (const candidate of extractJsonObjectCandidates(pool)) {
+            try {
+                return JSON.parse(candidate)
+            } catch (err) {
+                lastErr = err as Error
+            }
+
+            try {
+                return JSON.parse(escapeControlCharsInJsonStrings(candidate))
+            } catch (err) {
+                lastErr = err as Error
+            }
+        }
+    }
+
+    if (!lastErr) {
+        throw new Error('No JSON found in Forge response')
+    }
+    throw lastErr
+}
+
 export class ForgeEngine {
     /**
      * Blacksmith — forge a new browser-automation Skill from a natural-language intent.
@@ -131,10 +257,7 @@ Example:
 
         try {
             const response = await executeWithClaude(prompt, systemPrompt)
-            const jsonMatch = response.match(/\{[\s\S]*\}/)
-            if (!jsonMatch) throw new Error('No JSON found in Forge response')
-
-            const data = JSON.parse(jsonMatch[0])
+            const data = parseJsonObjectFromModel(response)
             if (!data.id || !data.name || !data.description || !data.executeBody) {
                 throw new Error('Incomplete skill schema in AI response')
             }
@@ -199,10 +322,7 @@ Example:
 
         try {
             const response = await executeWithClaude(prompt, systemPrompt, 8192)
-            const jsonMatch = response.match(/\{[\s\S]*\}/)
-            if (!jsonMatch) throw new Error('No JSON in fabrication response')
-
-            const data = JSON.parse(jsonMatch[0])
+            const data = parseJsonObjectFromModel(response)
             if (!data.filename || !data.code) throw new Error('Incomplete software schema')
 
             // Sanitize filename — prevent path traversal
