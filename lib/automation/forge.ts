@@ -222,7 +222,14 @@ function parseJsonObjectFromModel(response: string): any {
 
     for (const pool of pools) {
         // Try raw first, then repair
-        const candidates = extractJsonObjectCandidates(pool)
+        let candidates = extractJsonObjectCandidates(pool)
+
+        // BUG FIX: If no balanced candidates found, the pool might be truncated.
+        // Try to treat the entire pool as a single candidate for Repair.
+        if (candidates.length === 0 && pool.includes('{')) {
+            candidates = [pool]
+        }
+
         for (const candidate of candidates) {
             try {
                 const parsed = JSON.parse(candidate)
