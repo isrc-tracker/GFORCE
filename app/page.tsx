@@ -1,481 +1,569 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
-    Zap, ShieldAlert, Loader2, Search, Menu, MoreHorizontal,
-    Link2, Database, Code2, FileText, LayoutGrid, Play,
-    CheckCircle2, Circle, XCircle, ArrowRight, X,
+    AlertTriangle,
+    CheckCircle2,
+    Clock3,
+    Code2,
+    FileText,
+    FolderOpenDot,
+    Link2,
+    Loader2,
+    Menu,
+    MoreHorizontal,
+    Send,
+    Video,
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 
 const API_KEY = process.env.NEXT_PUBLIC_GFORCE_API_KEY ?? ''
-const AUTH: HeadersInit = API_KEY ? { 'x-gforce-key': API_KEY } : {}
 
-function authFetch(url: string, init?: RequestInit) {
-    return fetch(url, { ...init, headers: { ...AUTH, ...(init?.headers ?? {}) } })
+function authFetch(url: string, init: RequestInit = {}) {
+    const headers = new Headers(init.headers ?? undefined)
+    if (API_KEY) headers.set('x-gforce-key', API_KEY)
+    return fetch(url, { ...init, headers })
 }
 
-interface SessionResult {
-    id: string; name: string; prompt: string
-    category: 'links' | 'data' | 'code' | 'documents' | 'video'
-    data: any; error?: string; truncated?: boolean; createdAt: number
-}
-interface ActivityStep { label: string; status: 'pending' | 'active' | 'done' | 'error' }
-interface AuditSite { site: string; status: 'pass' | 'fail' }
+type ArtifactType = 'links' | 'video' | 'documents' | 'software'
+type StreamState = 'running' | 'done' | 'error'
 
-const CATEGORIES = [
-    { id: 'all',       label: 'All',   icon: LayoutGrid, gradient: 'from-pink-500 to-rose-500'     },
-    { id: 'links',     label: 'Links', icon: Link2,      gradient: 'from-cyan-400 to-teal-500'     },
-    { id: 'data',      label: 'Data',  icon: Database,   gradient: 'from-violet-500 to-purple-600' },
-    { id: 'code',      label: 'Code',  icon: Code2,      gradient: 'from-blue-500 to-blue-700'     },
-    { id: 'documents', label: 'Docs',  icon: FileText,   gradient: 'from-orange-400 to-orange-600' },
-    { id: 'video',     label: 'Video', icon: Play,       gradient: 'from-green-400 to-emerald-500' },
-]
-
-function categorize(data: any): SessionResult['category'] {
-    if (!data) return 'data'
-    const str = typeof data === 'string' ? data : JSON.stringify(data)
-    if (/youtube\.com|vimeo\.com|\.mp4|\.webm/i.test(str)) return 'video'
-    if (/https?:\/\//.test(str)) return 'links'
-    if (typeof data === 'string' && str.length > 500 && !str.trimStart().startsWith('{') && !str.trimStart().startsWith('[')) return 'documents'
-    return 'data'
+interface Artifact {
+    id: string
+    type: ArtifactType
+    title: string
+    subtitle: string
+    href?: string
+    raw?: string
+    createdAt: number
 }
 
-const SUGGESTIONS = [
-    'Scrape top 10 Hacker News titles and scores',
-    'Get top 5 results from GitHub trending',
-    'Extract all links from news.ycombinator.com',
-]
+interface StreamEvent {
+    id: string
+    state: StreamState
+    message: string
+    detail?: string
+    createdAt: number
+}
 
-function Badge({ status }: { status: ActivityStep['status'] }) {
-    const map = {
-        done:    { bg: 'bg-emerald-50 text-emerald-600', label: 'Done'    },
-        active:  { bg: 'bg-blue-50 text-blue-500',       label: 'Running' },
-        pending: { bg: 'bg-gray-100 text-gray-400',      label: 'Waiting' },
-        error:   { bg: 'bg-red-50 text-red-500',         label: 'Failed'  },
+interface PoolStats {
+    slots: number
+    inUse: number
+    idle: number
+    spawning: number
+    queued: number
+    browsers: number
+}
+
+const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi
+
+function makeId() {
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+function collectStrings(value: unknown, out: string[], depth = 0): void {
+    if (depth > 8 || value == null) return
+    if (typeof value === 'string') {
+        out.push(value)
+        return
     }
-    const { bg, label } = map[status]
-    return <span className={`text-[10px] font-semibold px-2.5 py-1 rounded-full shrink-0 ${bg}`}>{label}</span>
+    if (Array.isArray(value)) {
+        for (const item of value) collectStrings(item, out, depth + 1)
+        return
+    }
+    if (typeof value === 'object') {
+        for (const item of Object.values(value as Record<string, unknown>)) {
+            collectStrings(item, out, depth + 1)
+        }
+    }
 }
 
-export default function GForce() {
-    const [prompt, setPrompt] = useState('')
-    const [isRunning, setIsRunning] = useState(false)
-    const [activeTask, setActiveTask] = useState<string | null>(null)
-    const [activitySteps, setActivitySteps] = useState<ActivityStep[]>([])
-    const [results, setResults] = useState<SessionResult[]>([])
-    const [selectedCategory, setSelectedCategory] = useState('all')
-    const [selectedResult, setSelectedResult] = useState<SessionResult | null>(null)
-    const [poolStats, setPoolStats] = useState({ inUse: 0, idle: 0 })
-    const [isAuditing, setIsAuditing] = useState(false)
+function classifyUrl(url: string): ArtifactType {
+    const lower = url.toLowerCase()
+    if (
+        lower.includes('youtube.com') ||
+        lower.includes('youtu.be') ||
+        lower.includes('vimeo.com') ||
+        lower.includes('tiktok.com') ||
+        /\.(mp4|webm|mov|m3u8)(\?|#|$)/i.test(lower)
+    ) {
+        return 'video'
+    }
+    if (/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|json|xml)(\?|#|$)/i.test(lower)) {
+        return 'documents'
+    }
+    return 'links'
+}
 
-    const promptRef = useRef<HTMLInputElement>(null)
-    const timers = useRef<ReturnType<typeof setTimeout>[]>([])
+function inferRunMode(prompt: string): 'skill' | 'software' {
+    const p = prompt.trim().toLowerCase()
+    if (p.startsWith('/build ')) return 'software'
+    if (p.startsWith('/forge ')) return 'skill'
+    if (
+        /\b(build|create|generate|write|make)\b/.test(p) &&
+        /\b(software|tool|script|program|app|code)\b/.test(p)
+    ) {
+        return 'software'
+    }
+    return 'skill'
+}
+
+function formatTime(ts: number): string {
+    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+export default function Page() {
+    const [prompt, setPrompt] = useState('')
+    const [activeFolder, setActiveFolder] = useState<ArtifactType>('links')
+    const [working, setWorking] = useState(false)
+    const [currentPrompt, setCurrentPrompt] = useState('')
+    const [artifacts, setArtifacts] = useState<Artifact[]>([])
+    const [stream, setStream] = useState<StreamEvent[]>([])
+    const [poolStats, setPoolStats] = useState<PoolStats>({
+        slots: 0,
+        inUse: 0,
+        idle: 0,
+        spawning: 0,
+        queued: 0,
+        browsers: 0,
+    })
+
+    const pushEvent = (state: StreamState, message: string, detail?: string) => {
+        const evt: StreamEvent = {
+            id: makeId(),
+            state,
+            message,
+            detail,
+            createdAt: Date.now(),
+        }
+        setStream(prev => [evt, ...prev].slice(0, 120))
+    }
+
+    const addArtifact = (artifact: Artifact) => {
+        setArtifacts(prev => [artifact, ...prev].slice(0, 300))
+    }
+
+    const captureResultArtifacts = (source: string, result: unknown) => {
+        const textBits: string[] = []
+        collectStrings(result, textBits)
+        const urls = Array.from(
+            new Set(
+                textBits.flatMap(t => (t.match(URL_RE) ?? []).map(v => v.trim()))
+            )
+        ).slice(0, 40)
+
+        if (urls.length === 0) {
+            const raw = typeof result === 'string' ? result : JSON.stringify(result, null, 2)
+            addArtifact({
+                id: makeId(),
+                type: 'documents',
+                title: `${source} result snapshot`,
+                subtitle: 'Structured output saved',
+                raw: raw.slice(0, 8000),
+                createdAt: Date.now(),
+            })
+            return
+        }
+
+        for (const url of urls) {
+            let host = url
+            try {
+                host = new URL(url).host
+            } catch {
+                // Keep original URL if parsing fails.
+            }
+            addArtifact({
+                id: makeId(),
+                type: classifyUrl(url),
+                title: host,
+                subtitle: url,
+                href: url,
+                createdAt: Date.now(),
+            })
+        }
+    }
+
+    async function refreshPoolStats() {
+        try {
+            const res = await authFetch('/api/pool/stats')
+            if (!res.ok) return
+            const data = await res.json()
+            setPoolStats(data)
+        } catch {
+            // Best effort live telemetry.
+        }
+    }
 
     useEffect(() => {
-        promptRef.current?.focus()
-        const poll = async () => {
-            try {
-                const res = await authFetch('/api/pool/stats')
-                if (res.ok) {
-                    const d = await res.json()
-                    setPoolStats({ inUse: d.inUse ?? 0, idle: d.idle ?? 0 })
-                }
-            } catch { }
-        }
-        poll()
-        const id = setInterval(poll, 3000)
+        refreshPoolStats()
+        const id = setInterval(refreshPoolStats, 2000)
         return () => clearInterval(id)
     }, [])
 
-    function clearTimers() {
-        timers.current.forEach(clearTimeout)
-        timers.current = []
-    }
+    const folderCounts = useMemo(() => {
+        return artifacts.reduce(
+            (acc, item) => {
+                acc[item.type] += 1
+                return acc
+            },
+            { links: 0, video: 0, documents: 0, software: 0 } as Record<ArtifactType, number>
+        )
+    }, [artifacts])
 
-    const handleRun = async () => {
-        const intent = prompt.trim()
-        if (!intent || isRunning || isAuditing) return
-        setPrompt('')
-        setIsRunning(true)
-        setActiveTask(intent)
-        setSelectedResult(null)
-        setActivitySteps([
-            { label: 'Analyzing prompt',            status: 'active'  },
-            { label: 'Generating automation skill', status: 'pending' },
-            { label: 'Running in browser',          status: 'pending' },
-        ])
-        clearTimers()
-        timers.current.push(setTimeout(() => setActivitySteps(s => [
-            { ...s[0], status: 'done' }, { ...s[1], status: 'active' }, s[2],
-        ]), 2000))
-        timers.current.push(setTimeout(() => setActivitySteps(s => [
-            s[0], { ...s[1], status: 'done' }, { ...s[2], status: 'active' },
-        ]), 5000))
-
-        try {
-            const res = await authFetch('/api/forge-run', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ intent }),
-            })
-            const data = await res.json()
-            clearTimers()
-
-            if (data.success) {
-                setActivitySteps([
-                    { label: 'Analyzing prompt',            status: 'done' },
-                    { label: 'Generating automation skill', status: 'done' },
-                    { label: 'Running in browser',          status: 'done' },
-                ])
-                const result: SessionResult = {
-                    id: `${data.skill.id}-${Date.now()}`,
-                    name: data.skill.name,
-                    prompt: intent,
-                    category: categorize(data.result),
-                    data: data.result,
-                    truncated: Boolean(data.truncated),
-                    createdAt: Date.now(),
-                }
-                setResults(prev => [result, ...prev])
-                setSelectedResult(result)
-                toast.success(data.skill.name)
-            } else {
-                setActivitySteps(prev => prev.map(s =>
-                    s.status !== 'done' ? { ...s, status: 'error' as const } : s
-                ))
-                const errorResult: SessionResult = {
-                    id: `err-${Date.now()}`,
-                    name: 'Task Failed',
-                    prompt: intent,
-                    category: 'data',
-                    data: null,
-                    error: `[${data.stage ?? 'error'}] ${data.error}`,
-                    createdAt: Date.now(),
-                }
-                setResults(prev => [errorResult, ...prev])
-                setSelectedResult(errorResult)
-                toast.error('Task failed')
-            }
-        } catch (err) {
-            clearTimers()
-            setActivitySteps(prev => prev.map(s =>
-                s.status !== 'done' ? { ...s, status: 'error' as const } : s
-            ))
-            toast.error((err as Error).message)
-        } finally {
-            setIsRunning(false)
-        }
-    }
-
-    const runAudit = async () => {
-        if (isAuditing || isRunning) return
-        setIsAuditing(true)
-        setActiveTask('Stealth Fingerprint Audit')
-        setSelectedResult(null)
-        setActivitySteps([
-            { label: 'SannySoft fingerprint test', status: 'active'  },
-            { label: 'BrowserScan analysis',       status: 'pending' },
-            { label: 'CreepJS evaluation',         status: 'pending' },
-        ])
-        clearTimers()
-        timers.current.push(setTimeout(() => setActivitySteps(s => [
-            { ...s[0], status: 'done' }, { ...s[1], status: 'active' }, s[2],
-        ]), 25000))
-        timers.current.push(setTimeout(() => setActivitySteps(s => [
-            s[0], { ...s[1], status: 'done' }, { ...s[2], status: 'active' },
-        ]), 55000))
-
-        try {
-            const res = await authFetch('/api/audit/run', { method: 'POST' })
-            const data = await res.json()
-            clearTimers()
-            if (!data.success) throw new Error(data.error ?? 'Audit failed')
-            setActivitySteps(data.results.map((r: AuditSite) => ({
-                label: r.site,
-                status: (r.status === 'pass' ? 'done' : 'error') as ActivityStep['status'],
-            })))
-            const passed = data.results.filter((r: AuditSite) => r.status === 'pass').length
-            passed === data.results.length
-                ? toast.success(`Stealth: ${passed}/${data.results.length} clean`)
-                : toast.warning(`Stealth: ${passed}/${data.results.length} passed`)
-        } catch (err) {
-            clearTimers()
-            setActivitySteps(prev => prev.map(s =>
-                s.status !== 'done' ? { ...s, status: 'error' as const } : s
-            ))
-            toast.error('Audit failed')
-        } finally {
-            setIsAuditing(false)
-        }
-    }
-
-    const filteredResults = selectedCategory === 'all'
-        ? results
-        : results.filter(r => r.category === selectedCategory)
-
-    const counts = Object.fromEntries(
-        CATEGORIES.map(c => [c.id, c.id === 'all' ? results.length : results.filter(r => r.category === c.id).length])
+    const activeItems = useMemo(
+        () => artifacts.filter(item => item.type === activeFolder),
+        [artifacts, activeFolder]
     )
 
-    const busy = isRunning || isAuditing
-    const hasActivity = activitySteps.length > 0
-    const todaySteps = activitySteps.filter(s => s.status !== 'pending')
-    const upcomingSteps = activitySteps.filter(s => s.status === 'pending')
+    const latest = artifacts[0]
+
+    const runPrompt = async () => {
+        const text = prompt.trim()
+        if (!text || working) return
+
+        setPrompt('')
+        setWorking(true)
+        setCurrentPrompt(text)
+        pushEvent('running', 'Prompt accepted', text)
+
+        const mode = inferRunMode(text)
+        pushEvent('running', 'Planner selected mode', mode === 'software' ? 'software build' : 'skill forge + execute')
+
+        try {
+            if (mode === 'software') {
+                pushEvent('running', 'Building software artifact')
+                const res = await authFetch('/api/software', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ intent: text }),
+                })
+                const data = await res.json()
+                if (!res.ok || !data.success) throw new Error(data.error ?? 'Software build failed')
+
+                addArtifact({
+                    id: makeId(),
+                    type: 'software',
+                    title: data.filename,
+                    subtitle: data.description ?? 'Software output',
+                    href: data.downloadUrl,
+                    createdAt: Date.now(),
+                })
+                pushEvent('done', 'Software generated', data.filename)
+                toast.success(`Software built: ${data.filename}`)
+            } else {
+                pushEvent('running', 'Forging skill from prompt')
+                const forgeRes = await authFetch('/api/forge', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ intent: text }),
+                })
+                const forgeData = await forgeRes.json()
+                if (!forgeRes.ok || !forgeData.success) throw new Error(forgeData.error ?? 'Forge failed')
+                pushEvent('done', 'Skill forged', `${forgeData.name} (${forgeData.skillId})`)
+
+                pushEvent('running', 'Executing forged skill')
+                const execRes = await authFetch(`/api/skills/${encodeURIComponent(forgeData.skillId)}/execute`, {
+                    method: 'POST',
+                })
+                const execData = await execRes.json()
+                if (!execRes.ok || !execData.success) throw new Error(execData.error ?? 'Execution failed')
+
+                captureResultArtifacts(forgeData.name, execData.result)
+                pushEvent('done', 'Execution complete', execData.truncated ? 'result truncated by server' : 'result captured')
+                toast.success(`Completed: ${forgeData.name}`)
+            }
+        } catch (err) {
+            const message = (err as Error).message || 'Unknown error'
+            pushEvent('error', 'Run failed', message)
+            toast.error(message)
+        } finally {
+            setWorking(false)
+            refreshPoolStats()
+        }
+    }
+
+    const folders: Array<{ key: ArtifactType; title: string; icon: React.ElementType; color: string }> = [
+        { key: 'links', title: 'Links', icon: Link2, color: 'from-cyan-400 to-blue-500' },
+        { key: 'video', title: 'Video', icon: Video, color: 'from-fuchsia-400 to-purple-500' },
+        { key: 'documents', title: 'Documents', icon: FileText, color: 'from-amber-400 to-orange-500' },
+        { key: 'software', title: 'Software', icon: Code2, color: 'from-emerald-400 to-teal-500' },
+    ]
+
+    const nowEvents = stream.slice(0, 7)
+    const upcomingEvents = stream.slice(7, 14)
 
     return (
-        <div className="h-screen flex overflow-hidden font-sans">
-            <Toaster position="top-right" theme="dark" richColors />
+        <div className="min-h-screen bg-[#0a1025] p-3 md:p-8">
+            <Toaster position="top-right" theme="dark" />
 
-            {/* ══ LEFT PANEL ══ */}
-            <div className="w-[300px] shrink-0 bg-[#1e2240] flex flex-col overflow-hidden p-6 gap-5">
-
-                {/* Top bar */}
-                <div className="flex items-center justify-between">
-                    <Menu className="h-5 w-5 text-[#4a5080] cursor-pointer hover:text-white transition-colors" />
-                    <div className="flex items-center gap-1.5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                        <span className="text-[9px] font-bold tracking-widest text-emerald-400 uppercase">Online</span>
-                    </div>
-                </div>
-
-                {/* Greeting */}
-                <div>
-                    <div className="flex items-center gap-2 mb-1">
-                        <Zap className="h-5 w-5 text-yellow-400 fill-yellow-400 drop-shadow-[0_0_8px_rgba(234,179,8,0.5)]" />
-                        <h1 className="text-2xl font-bold text-white">G-Force</h1>
-                    </div>
-                    <p className="text-[12px] text-[#4a5080] leading-relaxed">Your autonomous automation engine.</p>
-                </div>
-
-                {/* Prompt input */}
-                <div className="relative">
-                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#4a5080]" />
-                    <input
-                        ref={promptRef}
-                        value={prompt}
-                        onChange={e => setPrompt(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && handleRun()}
-                        disabled={busy}
-                        placeholder="What do you want to automate?"
-                        className="w-full bg-[#252844] rounded-2xl pl-10 pr-12 py-3 text-sm text-white placeholder:text-[#4a5080] focus:outline-none disabled:opacity-50 transition-all"
-                    />
-                    <button
-                        onClick={handleRun}
-                        disabled={busy || !prompt.trim()}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-yellow-500 hover:bg-yellow-400 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-colors"
-                    >
-                        {isRunning
-                            ? <Loader2 className="h-3.5 w-3.5 text-black animate-spin" />
-                            : <ArrowRight className="h-3.5 w-3.5 text-black" />
-                        }
+            <div className="mx-auto max-w-[1420px] min-h-[90vh] overflow-hidden rounded-[26px] border-[5px] border-[#20274d] shadow-[0_40px_120px_rgba(0,0,0,0.55)] bg-[#edf0f8] lg:grid lg:grid-cols-12">
+                <aside className="lg:col-span-5 bg-gradient-to-b from-[#21274b] to-[#1a2040] text-[#f2f5ff] p-7 md:p-10 flex flex-col gap-7 relative">
+                    <div className="absolute right-10 top-8 h-24 w-24 opacity-25 [background-image:radial-gradient(circle,rgba(255,255,255,0.35)_1px,transparent_1px)] [background-size:8px_8px]" />
+                    <button className="h-9 w-9 rounded-full bg-white/8 border border-white/15 flex items-center justify-center text-white/80">
+                        <Menu className="h-4 w-4" />
                     </button>
-                </div>
 
-                {/* Category label */}
-                <div>
-                    <p className="text-[11px] font-semibold text-[#4a5080] mb-3">Saved · {results.length}</p>
-
-                    {/* Icon grid */}
-                    <div className="grid grid-cols-3 gap-3">
-                        {CATEGORIES.map(cat => {
-                            const isSelected = selectedCategory === cat.id
-                            return (
-                                <button
-                                    key={cat.id}
-                                    onClick={() => setSelectedCategory(cat.id)}
-                                    className="flex flex-col items-center gap-1.5 group"
-                                >
-                                    <div className={`relative h-[68px] w-[68px] rounded-2xl bg-gradient-to-br ${cat.gradient} flex items-center justify-center transition-all ${
-                                        isSelected
-                                            ? 'ring-2 ring-white ring-offset-2 ring-offset-[#1e2240] shadow-xl'
-                                            : 'opacity-75 hover:opacity-100'
-                                    }`}>
-                                        <cat.icon className="h-6 w-6 text-white" />
-                                        {isSelected && (
-                                            <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-white shadow" />
-                                        )}
-                                    </div>
-                                    <span className="text-[10px] text-[#4a5080] group-hover:text-[#8a90b8] transition-colors">{cat.label}</span>
-                                    <span className="text-xs font-bold text-white leading-none -mt-1">{counts[cat.id]}</span>
-                                </button>
-                            )
-                        })}
+                    <div>
+                        <h1 className="text-5xl font-black tracking-tight">Hi Operator</h1>
+                        <p className="text-base text-white/55 mt-2">Welcome back to the workspace. Type one prompt and everything runs automatically.</p>
                     </div>
-                </div>
 
-                {/* Result items */}
-                <div className="flex-1 overflow-y-auto min-h-0 space-y-0.5">
-                    {filteredResults.length === 0 ? (
-                        <p className="text-[10px] text-[#2e3356] text-center py-4 uppercase tracking-widest font-bold">
-                            {results.length === 0 ? 'No results yet' : 'Empty category'}
-                        </p>
-                    ) : filteredResults.map(r => {
-                        const cat = CATEGORIES.find(c => c.id === r.category) ?? CATEGORIES[0]
-                        return (
-                            <button
-                                key={r.id}
-                                onClick={() => setSelectedResult(r)}
-                                className={`w-full text-left px-3 py-2.5 rounded-xl transition-all flex items-center gap-2.5 ${
-                                    selectedResult?.id === r.id ? 'bg-white/10 text-white' : 'hover:bg-white/5 text-[#8a90b8]'
-                                }`}
-                            >
-                                <div className={`h-6 w-6 rounded-lg bg-gradient-to-br ${r.error ? 'from-red-500 to-red-600' : cat.gradient} flex items-center justify-center shrink-0`}>
-                                    {r.error ? <XCircle className="h-3 w-3 text-white" /> : <cat.icon className="h-3 w-3 text-white" />}
-                                </div>
-                                <div className="min-w-0">
-                                    <div className="text-[11px] font-semibold truncate">{r.name}</div>
-                                    <div className="text-[9px] opacity-50 truncate mt-0.5">{r.prompt}</div>
-                                </div>
-                            </button>
-                        )
-                    })}
-                </div>
+                    <div>
+                        <div className="rounded-2xl bg-white/8 border border-white/15 px-4 py-3 mb-4">
+                            <p className="text-xs uppercase tracking-[0.24em] text-white/45">Current Mission</p>
+                            <p className="text-sm text-white/80 mt-1 truncate">{currentPrompt || 'No prompt running yet'}</p>
+                        </div>
+                        <p className="text-sm font-semibold text-white/80 mb-3">Folders ({artifacts.length})</p>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                            {folders.map(folder => {
+                                const Icon = folder.icon
+                                const active = activeFolder === folder.key
+                                return (
+                                    <button
+                                        key={folder.key}
+                                        onClick={() => setActiveFolder(folder.key)}
+                                        className={`rounded-2xl p-2.5 border text-left transition-all ${
+                                            active
+                                                ? 'border-cyan-300/80 bg-white/15'
+                                                : 'border-white/10 bg-black/20 hover:bg-white/8'
+                                        }`}
+                                    >
+                                        <div className={`h-16 rounded-xl bg-gradient-to-br ${folder.color} flex items-center justify-center relative overflow-hidden`}>
+                                            <span className="absolute -right-1 -top-1 h-7 w-7 rounded-full bg-white/25" />
+                                            <Icon className="h-5 w-5 text-white" />
+                                        </div>
+                                        <p className="text-xs font-semibold mt-2">{folder.title}</p>
+                                        <p className="text-[11px] text-white/60 mt-0.5">{folderCounts[folder.key]} items</p>
+                                    </button>
+                                )
+                            })}
+                        </div>
+                    </div>
 
-                {/* Footer */}
-                <div className="flex items-center justify-between pt-3 border-t border-white/[0.05]">
-                    <span className="text-[9px] text-[#2e3356] font-mono">{poolStats.inUse} active · {poolStats.idle} idle</span>
-                    <button
-                        onClick={runAudit}
-                        disabled={busy}
-                        className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest text-[#2e3356] hover:text-[#8a90b8] disabled:opacity-40 transition-colors"
+                    <div className="rounded-2xl border border-white/10 bg-black/25 p-4 flex-1 min-h-[180px] overflow-y-auto">
+                        <div className="flex items-center justify-between mb-3">
+                            <p className="text-xs uppercase tracking-[0.2em] text-white/60">{activeFolder}</p>
+                            <FolderOpenDot className="h-4 w-4 text-white/50" />
+                        </div>
+
+                        {activeItems.length === 0 && (
+                            <p className="text-sm text-white/55">No items yet. Run a prompt to fill this folder.</p>
+                        )}
+
+                        <div className="space-y-2">
+                            {activeItems.slice(0, 12).map(item => (
+                                <div key={item.id} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                                    <p className="text-sm font-semibold truncate">{item.title}</p>
+                                    <p className="text-xs text-white/60 truncate mt-0.5">{item.subtitle}</p>
+                                    {item.href && (
+                                        <button
+                                            className="text-xs text-cyan-300 mt-2 underline underline-offset-2"
+                                            onClick={() => window.open(item.href, '_blank')}
+                                        >
+                                            Open
+                                        </button>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <form
+                        onSubmit={(e) => {
+                            e.preventDefault()
+                            runPrompt()
+                        }}
+                        className="rounded-2xl border border-white/10 bg-black/30 p-2 flex items-center gap-2"
                     >
-                        {isAuditing ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <ShieldAlert className="h-2.5 w-2.5" />}
-                        Audit
-                    </button>
-                </div>
-            </div>
+                        <input
+                            value={prompt}
+                            onChange={e => setPrompt(e.target.value)}
+                            disabled={working}
+                            placeholder="Write your prompt..."
+                            className="flex-1 bg-transparent px-3 py-2 text-sm outline-none placeholder:text-white/45"
+                        />
+                        <button
+                            type="submit"
+                            disabled={working || !prompt.trim()}
+                            className="h-10 w-10 rounded-xl bg-cyan-400 text-[#0f1738] flex items-center justify-center disabled:opacity-45"
+                        >
+                            {working ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                        </button>
+                    </form>
+                </aside>
 
-            {/* ══ RIGHT PANEL ══ */}
-            <div className="flex-1 bg-white flex flex-col overflow-hidden">
+                <section className="lg:col-span-7 bg-[#f7f8fc] p-7 md:p-10 text-[#1c2445] flex flex-col gap-6">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                            <h2 className="text-4xl font-black tracking-tight">Execution Board</h2>
+                            <p className="text-sm text-[#5e668a] mt-1">Live representation of what the engine is doing from your single prompt.</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <div className="h-9 w-9 rounded-full bg-[#ffb3b3]" />
+                            <div className="h-9 w-9 rounded-full bg-[#b3cbff] -ml-2" />
+                            <div className="h-9 w-9 rounded-full bg-[#c5b3ff] -ml-2" />
+                            <div className="h-9 w-9 rounded-full border border-[#d2d7ea] bg-white text-[#8b93b8] flex items-center justify-center text-sm font-semibold -ml-1">+</div>
+                        </div>
+                    </div>
 
-                {/* Header */}
-                <div className="px-8 pt-8 pb-5">
-                    <h2 className="text-2xl font-bold text-gray-900 truncate leading-tight">
-                        {activeTask ?? 'Command Center'}
-                    </h2>
-                    <p className="text-sm text-gray-400 mt-1">
-                        {isRunning    ? 'Working on it...' :
-                         isAuditing   ? 'Running stealth audit...' :
-                         hasActivity && activitySteps.some(s => s.status === 'error') ? 'Task failed' :
-                         hasActivity  ? 'Completed successfully' :
-                         'Type a prompt on the left to begin'}
-                    </p>
-                </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <Metric label="Active" value={poolStats.inUse} />
+                        <Metric label="Queued" value={poolStats.queued} />
+                        <Metric label="Saved" value={artifacts.length} />
+                        <Metric label="Status" value={working ? 1 : 0} asStatus />
+                    </div>
 
-                {/* Body */}
-                <div className="flex-1 overflow-y-auto px-8 pb-8">
-                    {!hasActivity && !selectedResult ? (
-
-                        /* Idle */
-                        <div className="flex flex-col items-start gap-2 pt-2">
-                            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest mb-1">Try these</p>
-                            {SUGGESTIONS.map(s => (
-                                <button
-                                    key={s}
-                                    onClick={() => { setPrompt(s); promptRef.current?.focus() }}
-                                    className="w-full max-w-md flex items-center justify-between px-4 py-3.5 rounded-2xl border border-gray-100 hover:border-gray-200 hover:bg-gray-50 transition-all text-left group"
-                                >
-                                    <span className="text-sm text-gray-600 group-hover:text-gray-900 transition-colors">{s}</span>
-                                    <ArrowRight className="h-3.5 w-3.5 text-gray-300 group-hover:text-gray-500 shrink-0 ml-3" />
-                                </button>
+                    <div className="rounded-3xl border border-[#d8ddec] bg-white p-6 flex-1">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-xl font-black">Today</h3>
+                            <MoreHorizontal className="h-4 w-4 text-[#8a92b7]" />
+                        </div>
+                        <div className="mt-4 space-y-2">
+                            {nowEvents.length === 0 && (
+                                <div className="rounded-xl border border-dashed border-[#d3d8e9] bg-[#fbfcff] p-4 text-sm text-[#7480a8]">
+                                    Waiting for the first prompt...
+                                </div>
+                            )}
+                            {nowEvents.map(event => (
+                                <TaskRow
+                                    key={event.id}
+                                    title={event.message}
+                                    detail={event.detail}
+                                    state={event.state}
+                                    time={formatTime(event.createdAt)}
+                                />
                             ))}
                         </div>
 
-                    ) : (
-                        <div className="space-y-7 max-w-xl">
-
-                            {/* Today — active/done/error steps */}
-                            {todaySteps.length > 0 && (
-                                <div>
-                                    <div className="flex items-center justify-between mb-4">
-                                        <h3 className="text-sm font-semibold text-gray-800">Today</h3>
-                                        <MoreHorizontal className="h-4 w-4 text-gray-300" />
-                                    </div>
-                                    <div className="space-y-3.5">
-                                        {todaySteps.map((step, i) => (
-                                            <div key={i} className="flex items-center gap-3">
-                                                <div className="shrink-0 w-5 h-5 flex items-center justify-center">
-                                                    {step.status === 'done' && (
-                                                        <div className="h-5 w-5 rounded-full bg-teal-500 flex items-center justify-center">
-                                                            <CheckCircle2 className="h-3.5 w-3.5 text-white" strokeWidth={3} />
-                                                        </div>
-                                                    )}
-                                                    {step.status === 'active' && <Loader2 className="h-5 w-5 text-blue-500 animate-spin" />}
-                                                    {step.status === 'error' && (
-                                                        <div className="h-5 w-5 rounded-full bg-red-100 flex items-center justify-center">
-                                                            <XCircle className="h-3.5 w-3.5 text-red-500" />
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <span className={`flex-1 text-sm ${
-                                                    step.status === 'done'   ? 'text-gray-500' :
-                                                    step.status === 'active' ? 'text-gray-900 font-medium' :
-                                                    'text-red-500'
-                                                }`}>{step.label}</span>
-                                                <Badge status={step.status} />
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Upcoming — pending steps */}
-                            {upcomingSteps.length > 0 && (
-                                <div>
-                                    <div className="flex items-center justify-between mb-4">
-                                        <h3 className="text-sm font-semibold text-gray-800">Upcoming</h3>
-                                        <MoreHorizontal className="h-4 w-4 text-gray-300" />
-                                    </div>
-                                    <div className="space-y-3.5">
-                                        {upcomingSteps.map((step, i) => (
-                                            <div key={i} className="flex items-center gap-3">
-                                                <Circle className="h-5 w-5 text-gray-200 shrink-0" />
-                                                <span className="flex-1 text-sm text-gray-400">{step.label}</span>
-                                                <Badge status="pending" />
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Result */}
-                            {selectedResult && (
-                                <div>
-                                    <div className="flex items-center justify-between mb-4">
-                                        <h3 className="text-sm font-semibold text-gray-800">Result</h3>
-                                        <div className="flex items-center gap-2">
-                                            {selectedResult.truncated && (
-                                                <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full">Truncated</span>
-                                            )}
-                                            <button onClick={() => setSelectedResult(null)} className="text-gray-300 hover:text-gray-500 transition-colors">
-                                                <X className="h-4 w-4" />
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div className={`rounded-2xl border overflow-hidden ${selectedResult.error ? 'border-red-100' : 'border-gray-100'}`}>
-                                        <div className={`px-5 py-3 border-b flex items-center justify-between ${selectedResult.error ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'}`}>
-                                            <span className="text-xs font-semibold text-gray-500 truncate">{selectedResult.name}</span>
-                                            <span className={`text-[10px] font-semibold px-2.5 py-1 rounded-full ml-2 shrink-0 ${selectedResult.error ? 'bg-red-100 text-red-500' : 'bg-emerald-50 text-emerald-600'}`}>
-                                                {selectedResult.error ? 'Failed' : 'Success'}
-                                            </span>
-                                        </div>
-                                        <div className="bg-gray-50 p-5 max-h-[50vh] overflow-y-auto font-mono text-[11px] text-gray-600 leading-relaxed whitespace-pre-wrap select-text">
-                                            {selectedResult.error
-                                                ? <span className="text-red-500">{selectedResult.error}</span>
-                                                : typeof selectedResult.data === 'string'
-                                                    ? selectedResult.data
-                                                    : JSON.stringify(selectedResult.data, null, 2)
-                                            }
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
+                        <div className="flex items-center justify-between mt-8">
+                            <h3 className="text-xl font-black">Upcoming</h3>
+                            <MoreHorizontal className="h-4 w-4 text-[#8a92b7]" />
                         </div>
-                    )}
-                </div>
+                        <div className="mt-4 space-y-2">
+                            {upcomingEvents.length === 0 ? (
+                                <TaskRow
+                                    title={working ? 'Mission in progress' : 'Awaiting next prompt'}
+                                    detail={working ? 'Planner and executors are running now' : 'Submit a prompt from the left panel'}
+                                    state={working ? 'running' : 'done'}
+                                />
+                            ) : (
+                                upcomingEvents.map(event => (
+                                    <TaskRow
+                                        key={event.id}
+                                        title={event.message}
+                                        detail={event.detail}
+                                        state={event.state}
+                                        time={formatTime(event.createdAt)}
+                                    />
+                                ))
+                            )}
+                        </div>
+
+                        <div className="mt-8 rounded-2xl border border-[#e0e5f2] bg-[#f9fbff] p-4">
+                            <div className="flex items-center justify-between">
+                                <p className="text-xs uppercase tracking-[0.22em] text-[#7c84aa]">Latest Output</p>
+                                <Clock3 className="h-3.5 w-3.5 text-[#8991b4]" />
+                            </div>
+                            {latest ? (
+                                <div className="mt-2">
+                                    <p className="text-sm font-semibold text-[#202a4d]">{latest.title}</p>
+                                    <p className="text-xs text-[#66739f] mt-0.5 break-all">{latest.subtitle}</p>
+                                    {latest.href && (
+                                        <button
+                                            className="text-xs font-semibold text-[#3d4fe0] mt-2 underline underline-offset-2"
+                                            onClick={() => window.open(latest.href, '_blank')}
+                                        >
+                                            Open saved artifact
+                                        </button>
+                                    )}
+                                </div>
+                            ) : (
+                                <p className="text-sm text-[#7d86ac] mt-2">No output saved yet.</p>
+                            )}
+                        </div>
+                    </div>
+                </section>
             </div>
         </div>
+    )
+}
+
+function Metric({ label, value, asStatus = false }: { label: string; value: number; asStatus?: boolean }) {
+    if (asStatus) {
+        return (
+            <div className="rounded-2xl border border-[#d7dced] bg-white px-4 py-3">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-[#7d86ac]">{label}</p>
+                <div className="mt-1 flex items-center gap-2">
+                    {value > 0 ? <Loader2 className="h-4 w-4 animate-spin text-[#4f5bd5]" /> : <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+                    <p className="text-sm font-bold text-[#26315a]">{value > 0 ? 'Running' : 'Idle'}</p>
+                </div>
+            </div>
+        )
+    }
+    return (
+        <div className="rounded-2xl border border-[#d7dced] bg-white px-4 py-3">
+            <p className="text-[11px] uppercase tracking-[0.2em] text-[#7d86ac]">{label}</p>
+            <p className="text-2xl font-black text-[#1f284a] mt-1">{value}</p>
+        </div>
+    )
+}
+
+function TaskRow({
+    title,
+    detail,
+    state,
+    time,
+}: {
+    title: string
+    detail?: string
+    state: StreamState
+    time?: string
+}) {
+    return (
+        <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-xl border border-[#e4e8f3] bg-[#fcfdff] px-3 py-2.5">
+            <StatusBullet state={state} />
+            <div>
+                <p className="text-sm font-semibold text-[#25305a]">{title}</p>
+                {detail && <p className="text-xs text-[#7180aa] mt-0.5">{detail}</p>}
+            </div>
+            <div className="flex flex-col items-end gap-1">
+                <StateBadge state={state} />
+                {time && (
+                    <p className="text-[10px] text-[#9098bb]">{time}</p>
+                )}
+            </div>
+        </div>
+    )
+}
+
+function StatusBullet({ state }: { state: StreamState }) {
+    if (state === 'running') {
+        return <Loader2 className="h-4 w-4 animate-spin text-[#5a67ea]" />
+    }
+    if (state === 'done') {
+        return <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+    }
+    return <AlertTriangle className="h-4 w-4 text-rose-500" />
+}
+
+function StateBadge({ state }: { state: StreamState }) {
+    if (state === 'running') {
+        return (
+            <span className="rounded-full bg-[#e6eefc] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[#4f67d6]">
+                In Progress
+            </span>
+        )
+    }
+    if (state === 'done') {
+        return (
+            <span className="rounded-full bg-[#eaf8ef] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[#2e8a54]">
+                Complete
+            </span>
+        )
+    }
+    return (
+        <span className="rounded-full bg-[#fdecef] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[#be3d5f]">
+            Failed
+        </span>
     )
 }
