@@ -4,6 +4,6 @@ node_modules/
 .env.local
 .env.*.local
 nginx/certs/
-skills/
-tools/
+/skills/
+/tools/
 *.log

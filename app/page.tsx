@@ -2,90 +2,51 @@
 
 import { useState, useEffect, useRef } from 'react'
 import {
-    Zap,
-    ShieldAlert,
-    Activity,
-    Lock,
-    RefreshCw,
-    Settings,
-    Plus,
-    Ghost,
-    ChevronRight,
-    Download,
-    Code2,
-    Cpu,
-    CheckCircle2,
-    XCircle,
-    Loader2,
-    Package,
-    Wrench,
+    Zap, ShieldAlert, Activity, Lock, RefreshCw, Settings,
+    Ghost, ChevronRight, Download, Code2, Cpu, CheckCircle2,
+    XCircle, Loader2, Package, Wrench, Play, X, Terminal,
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { TacticalConsole } from '@/components/tactical-console'
 
-// Include API key header if configured via env
 const API_KEY = process.env.NEXT_PUBLIC_GFORCE_API_KEY ?? ''
 const AUTH: HeadersInit = API_KEY ? { 'x-gforce-key': API_KEY } : {}
 
 function authFetch(url: string, init?: RequestInit) {
-    return fetch(url, {
-        ...init,
-        headers: { ...AUTH, ...(init?.headers ?? {}) },
-    })
+    return fetch(url, { ...init, headers: { ...AUTH, ...(init?.headers ?? {}) } })
 }
 
-interface StoredSkill {
-    id: string
-    name: string
-    description: string
-    executeBody: string
-    createdAt: string
-}
-
-interface AuditResult {
-    site: string
-    status: 'pass' | 'fail'
-    title?: string
-    error?: string
-}
-
-interface SoftwareResult {
-    filename: string
-    description: string
-    code: string
-    downloadUrl: string
-}
+interface StoredSkill { id: string; name: string; description: string; executeBody: string; createdAt: string }
+interface AuditResult { site: string; status: 'pass' | 'fail'; title?: string; error?: string }
+interface SoftwareResult { filename: string; description: string; code: string; downloadUrl: string }
+interface SkillRunResult { skillId: string; name: string; data: any; error?: string; truncated?: boolean }
 
 export default function GForcePremium() {
     const [poolStats, setPoolStats] = useState({ slots: 0, inUse: 0, idle: 0, spawning: 0, queued: 0, browsers: 0 })
     const [isForging, setIsForging] = useState(false)
     const [forgeLogs, setForgeLogs] = useState<string[]>([
-        '[FORGE] Forge Protocol v3.0.0 Online.',
+        '[FORGE] Forge Protocol v3.0.0 — Online',
         '[FORGE] Skill validation: ACTIVE. Persistence: ENABLED.',
     ])
     const [logs, setLogs] = useState<string[]>([
-        '[SYSTEM] G-Force G5 Engine. Obsidian Kernel Loaded.',
-        '[STEALTH] Red-Team drivers: Active. Hardware Spoofing: Enabled.',
+        '[SYSTEM] G-Force G5 Engine. Obsidian Kernel loaded.',
+        '[STEALTH] Red-Team drivers active. Hardware spoofing enabled.',
         '[STEALTH] WebGL1 + WebGL2 masked. Fingerprint: Chromium 131.',
         '[READY] Tactical Command interface awaiting input.',
     ])
-
-    // Skill inventory
     const [skills, setSkills] = useState<StoredSkill[]>([])
     const [loadingSkills, setLoadingSkills] = useState(false)
-
-    // Audit state
     const [isAuditing, setIsAuditing] = useState(false)
     const [auditResults, setAuditResults] = useState<AuditResult[] | null>(null)
-
-    // Software Forge state
     const [softwareIntent, setSoftwareIntent] = useState('')
     const [isFabricating, setIsFabricating] = useState(false)
     const [fabricated, setFabricated] = useState<SoftwareResult[]>([])
     const [fabLogs, setFabLogs] = useState<string[]>([
-        '[FABRICATOR] Software Forge: Online.',
+        '[FABRICATOR] Software Forge — Online.',
         '[FABRICATOR] Ready to build any tool or program.',
     ])
+    const [runningSkillId, setRunningSkillId] = useState<string | null>(null)
+    const [skillResult, setSkillResult] = useState<SkillRunResult | null>(null)
 
     const logsEndRef = useRef<HTMLDivElement>(null)
     const forgeEndRef = useRef<HTMLDivElement>(null)
@@ -95,20 +56,18 @@ export default function GForcePremium() {
     useEffect(() => { forgeEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [forgeLogs])
     useEffect(() => { fabEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [fabLogs])
 
-    // Poll pool stats every 2s
     useEffect(() => {
         const poll = async () => {
             try {
                 const res = await authFetch('/api/pool/stats')
                 if (res.ok) setPoolStats(await res.json())
-            } catch { /* server may not be ready */ }
+            } catch { }
         }
         poll()
         const id = setInterval(poll, 2000)
         return () => clearInterval(id)
     }, [])
 
-    // Load skill inventory on mount
     useEffect(() => { fetchSkills() }, [])
 
     async function fetchSkills() {
@@ -116,478 +75,490 @@ export default function GForcePremium() {
         try {
             const res = await authFetch('/api/skills')
             if (res.ok) setSkills(await res.json())
-        } catch { /* ignore */ } finally {
-            setLoadingSkills(false)
-        }
+        } catch { } finally { setLoadingSkills(false) }
     }
-
-    // ─── Tactical Command (Skill Forge) ───────────────────────────────────────
 
     const handleTacticalCommand = async (command: string) => {
         setIsForging(true)
-        setForgeLogs(prev => [...prev, `[USER] > ${command}`, `[FORGE] Analyzing intent: "${command}"...`])
-
+        setForgeLogs(prev => [...prev, `[USER] > ${command}`, `[FORGE] Analyzing intent...`])
         try {
             const res = await authFetch('/api/forge', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ intent: command }),
             })
-
             const data = await res.json()
-
             if (data.success) {
                 setForgeLogs(prev => [
                     ...prev,
-                    `[FORGE] ✅ Skill validated and hot-loaded: ${data.name}`,
-                    `[FORGE] Description: ${data.description}`,
+                    `[FORGE] ✅ Skill validated: ${data.name}`,
                     `[FORGE] ID: ${data.skillId} — persisted to disk.`,
                 ])
                 setLogs(prev => [...prev, `[SYSTEM] New skill registered: ${data.name}`])
-                toast.success(`Skill Forged: ${data.name}`)
-                // Refresh inventory
+                toast.success(`Skill forged: ${data.name}`)
                 fetchSkills()
             } else {
                 throw new Error(data.error)
             }
         } catch (err) {
-            setForgeLogs(prev => [...prev, `[FORGE] ❌ BLACKSMITHING FAILED: ${(err as Error).message}`])
-            toast.error('Forge Protocol Failure')
+            setForgeLogs(prev => [...prev, `[FORGE] ❌ FAILED: ${(err as Error).message}`])
+            toast.error('Forge failed')
         } finally {
             setIsForging(false)
         }
     }
 
-    // ─── Real Stealth Audit ────────────────────────────────────────────────────
-
     const runAudit = async () => {
         if (isAuditing) return
         setIsAuditing(true)
         setAuditResults(null)
-        setLogs(prev => [
-            ...prev,
-            '[AUDIT] Initiating Red-Team stealth audit...',
-            '[AUDIT] Launching stealth browser. Testing 3 detection sites...',
-        ])
-
+        setLogs(prev => [...prev, '[AUDIT] Initiating stealth audit — 3 detection sites...'])
         try {
             const res = await authFetch('/api/audit/run', { method: 'POST' })
             const data = await res.json()
-
             if (!data.success) throw new Error(data.error ?? 'Audit failed')
-
             setAuditResults(data.results)
             const passed = data.results.filter((r: AuditResult) => r.status === 'pass').length
-            const total = data.results.length
-
             setLogs(prev => [
                 ...prev,
                 ...data.results.map((r: AuditResult) =>
-                    r.status === 'pass'
-                        ? `[AUDIT] ✅ ${r.site} — PASS (${r.title})`
-                        : `[AUDIT] ❌ ${r.site} — FAIL: ${r.error}`
+                    r.status === 'pass' ? `[AUDIT] ✅ ${r.site} — PASS` : `[AUDIT] ❌ ${r.site} — FAIL: ${r.error}`
                 ),
-                `[AUDIT] Score: ${passed}/${total} — ${passed === total ? 'UNDETECTABLE' : 'PARTIAL DETECTION'}`,
+                `[AUDIT] Score: ${passed}/${data.results.length}`,
             ])
-
-            passed === total
-                ? toast.success(`Stealth Audit: ${passed}/${total} PASSED`)
-                : toast.warning(`Stealth Audit: ${passed}/${total} passed`)
+            passed === data.results.length
+                ? toast.success(`Stealth audit: ${passed}/${data.results.length} passed`)
+                : toast.warning(`Stealth audit: ${passed}/${data.results.length} passed`)
         } catch (err) {
-            setLogs(prev => [...prev, `[AUDIT] ❌ Audit error: ${(err as Error).message}`])
-            toast.error('Audit Failed')
+            setLogs(prev => [...prev, `[AUDIT] ❌ ${(err as Error).message}`])
+            toast.error('Audit failed')
         } finally {
             setIsAuditing(false)
         }
     }
-
-    // ─── Software Fabricator ──────────────────────────────────────────────────
 
     const handleFabricate = async () => {
         if (!softwareIntent.trim() || isFabricating) return
         const intent = softwareIntent.trim()
         setSoftwareIntent('')
         setIsFabricating(true)
-        setFabLogs(prev => [
-            ...prev,
-            `[USER] > ${intent}`,
-            `[FABRICATOR] Designing software architecture...`,
-            `[FABRICATOR] Invoking AI code generation...`,
-        ])
-
+        setFabLogs(prev => [...prev, `[USER] > ${intent}`, `[FABRICATOR] Generating...`])
         try {
             const res = await authFetch('/api/software', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ intent }),
             })
-
             const data = await res.json()
-
             if (!data.success) throw new Error(data.error)
-
             setFabLogs(prev => [
                 ...prev,
-                `[FABRICATOR] ✅ Software fabricated: ${data.filename}`,
-                `[FABRICATOR] Description: ${data.description}`,
-                `[FABRICATOR] Saved to tools/${data.filename} — ready to download.`,
+                `[FABRICATOR] ✅ ${data.filename} — ${data.description}`,
             ])
             setFabricated(prev => [...prev, data])
-            toast.success(`Software built: ${data.filename}`)
+            toast.success(`Built: ${data.filename}`)
         } catch (err) {
-            setFabLogs(prev => [...prev, `[FABRICATOR] ❌ BUILD FAILED: ${(err as Error).message}`])
-            toast.error('Fabrication Failed')
+            setFabLogs(prev => [...prev, `[FABRICATOR] ❌ ${(err as Error).message}`])
+            toast.error('Fabrication failed')
         } finally {
             setIsFabricating(false)
         }
     }
 
-    const downloadSkill = (skill: StoredSkill) => {
-        window.open(`/api/skills/${skill.id}/download`, '_blank')
-    }
-
-    const downloadTool = (tool: SoftwareResult) => {
-        window.open(tool.downloadUrl, '_blank')
+    const handleRunSkill = async (skill: StoredSkill) => {
+        setRunningSkillId(skill.id)
+        setSkillResult(null)
+        setLogs(prev => [...prev, `[EXEC] Running skill: ${skill.name}...`])
+        try {
+            const res = await authFetch(`/api/skills/${skill.id}/execute`, { method: 'POST' })
+            const data = await res.json()
+            if (data.success) {
+                setSkillResult({
+                    skillId: skill.id,
+                    name: skill.name,
+                    data: data.result,
+                    truncated: Boolean(data.truncated),
+                })
+                setLogs(prev => [...prev, `[EXEC] OK ${skill.name} - completed${data.truncated ? ' (truncated output)' : ''}`])
+                toast.success(`${skill.name} executed`)
+            } else {
+                setSkillResult({ skillId: skill.id, name: skill.name, data: null, error: data.error })
+                setLogs(prev => [...prev, `[EXEC] FAIL ${skill.name} - ${data.error}`])
+                toast.error('Skill execution failed')
+            }
+        } catch (err) {
+            const msg = (err as Error).message
+            setSkillResult({ skillId: skill.id, name: skill.name, data: null, error: msg })
+            setLogs(prev => [...prev, `[EXEC] FAIL ${skill.name} - ${msg}`])
+            toast.error('Skill execution failed')
+        } finally {
+            setRunningSkillId(null)
+        }
     }
 
     return (
-        <div className="flex flex-col gap-8 p-10 bg-black min-h-screen text-white font-sans selection:bg-yellow-500 selection:text-black">
-            <Toaster position="top-right" theme="dark" />
+        <div className="min-h-screen bg-black text-white font-sans selection:bg-yellow-500 selection:text-black">
+            <Toaster position="top-right" theme="dark" richColors />
 
-            {/* Header */}
-            <div className="flex justify-between items-start">
-                <div className="relative group">
-                    <div className="absolute -inset-1 bg-gradient-to-r from-yellow-500 to-transparent opacity-20 blur group-hover:opacity-40 transition duration-1000"></div>
-                    <div className="relative">
-                        <h1 className="text-5xl font-black tracking-tighter flex items-center gap-4 italic leading-none">
-                            <Zap className="h-12 w-12 text-yellow-500 fill-yellow-500 drop-shadow-[0_0_8px_rgba(234,179,8,0.8)]" />
-                            G-FORCE <span className="text-zinc-600 font-light text-3xl not-italic ml-2 tracking-normal uppercase">Command</span>
-                        </h1>
-                        <div className="flex items-center gap-3 mt-4">
-                            <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.8)]" />
-                            <p className="text-zinc-500 text-xs font-black tracking-[0.3em] uppercase">SYSTEM.ONLINE // MODE.STANDALONE</p>
+            {/* ── Header ── */}
+            <header className="border-b border-white/[0.06] px-8 py-5 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-3">
+                        <div className="relative">
+                            <Zap className="h-7 w-7 text-yellow-400 fill-yellow-400 drop-shadow-[0_0_12px_rgba(234,179,8,0.6)]" />
                         </div>
+                        <div>
+                            <h1 className="text-lg font-black tracking-tight leading-none">G-FORCE</h1>
+                            <p className="text-[10px] font-bold tracking-[0.25em] text-zinc-500 uppercase mt-0.5">Command Interface</p>
+                        </div>
+                    </div>
+                    <div className="h-4 w-px bg-white/10 ml-2" />
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-green-500/10 border border-green-500/20 rounded-lg">
+                        <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
+                        <span className="text-[10px] font-bold tracking-widest text-green-400 uppercase">Online</span>
                     </div>
                 </div>
 
-                <div className="flex gap-4">
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-4 px-4 py-2 bg-zinc-950 border border-white/[0.06] rounded-xl">
+                        <Stat label="Active" value={poolStats.inUse} color="text-yellow-400" />
+                        <div className="h-3 w-px bg-white/10" />
+                        <Stat label="Idle" value={poolStats.idle} color="text-blue-400" />
+                        <div className="h-3 w-px bg-white/10" />
+                        <Stat label="Queued" value={poolStats.queued} color="text-zinc-400" />
+                    </div>
                     <button
                         onClick={runAudit}
                         disabled={isAuditing}
-                        className="group relative px-6 py-3 bg-zinc-900 border border-white/5 rounded-xl transition-all hover:bg-zinc-800 hover:border-yellow-500/50 disabled:opacity-50"
+                        className="flex items-center gap-2 px-4 py-2.5 bg-zinc-950 border border-white/[0.06] rounded-xl text-xs font-bold tracking-widest uppercase hover:border-yellow-500/30 hover:text-yellow-400 transition-all disabled:opacity-50"
                     >
-                        <div className="flex items-center gap-3">
-                            {isAuditing
-                                ? <Loader2 className="h-4 w-4 text-yellow-500 animate-spin" />
-                                : <ShieldAlert className="h-4 w-4 text-yellow-500 group-hover:animate-pulse" />
-                            }
-                            <span className="text-xs font-black tracking-widest uppercase">
-                                {isAuditing ? 'AUDITING...' : 'STEALTH AUDIT'}
-                            </span>
-                        </div>
-                    </button>
-
-                    <button className="px-6 py-3 bg-yellow-500 text-black rounded-xl font-black text-xs tracking-widest uppercase hover:bg-yellow-400 transition-colors flex items-center gap-3 shadow-[0_0_20px_rgba(234,179,8,0.3)]">
-                        <Plus className="h-4 w-4" /> NEW MISSION
-                    </button>
-
-                    <button className="p-3 bg-zinc-900 border border-white/5 rounded-xl hover:bg-zinc-800 transition-colors">
-                        <Settings className="h-5 w-5 text-zinc-500" />
-                    </button>
-                </div>
-            </div>
-
-            {/* Audit Results Banner */}
-            {auditResults && (
-                <div className="grid grid-cols-3 gap-4">
-                    {auditResults.map(r => (
-                        <div
-                            key={r.site}
-                            className={`rounded-xl p-4 border flex items-center gap-3 ${
-                                r.status === 'pass'
-                                    ? 'bg-green-500/10 border-green-500/30'
-                                    : 'bg-red-500/10 border-red-500/30'
-                            }`}
-                        >
-                            {r.status === 'pass'
-                                ? <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0" />
-                                : <XCircle className="h-5 w-5 text-red-500 shrink-0" />
-                            }
-                            <div>
-                                <div className="text-xs font-black text-zinc-300">{r.site}</div>
-                                <div className={`text-[10px] font-bold tracking-widest ${r.status === 'pass' ? 'text-green-500' : 'text-red-400'}`}>
-                                    {r.status === 'pass' ? 'UNDETECTED' : 'DETECTED'}
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            {/* Main Tactical Layer */}
-            <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
-                <div className="xl:col-span-3 flex flex-col gap-8">
-                    <TacticalConsole onCommand={handleTacticalCommand} isForging={isForging} />
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full">
-                        <TerminalWindow
-                            title="MISSION LOG"
-                            logs={logs}
-                            color="text-yellow-100"
-                            dot="bg-red-500"
-                            scrollRef={logsEndRef}
-                        />
-                        <TerminalWindow
-                            title="FORGE BLACKSMITH"
-                            logs={forgeLogs}
-                            color="text-yellow-500"
-                            dot="bg-yellow-500"
-                            scrollRef={forgeEndRef}
-                        />
-                    </div>
-                </div>
-
-                {/* Sidebar */}
-                <div className="flex flex-col gap-8">
-                    <div className="space-y-4">
-                        <StatCardSmall title="ACTIVE" value={poolStats.inUse} color="text-yellow-500" icon={Ghost} />
-                        <StatCardSmall title="STEALTH" value="HUMAN-ZERO" color="text-green-500" icon={Lock} />
-                        <StatCardSmall title="IDLE" value={poolStats.idle} color="text-blue-500" icon={Activity} />
-                    </div>
-
-                    {/* Fleet Manifest */}
-                    <div className="bg-zinc-950 border border-white/5 rounded-2xl p-6 flex flex-col h-full relative overflow-hidden">
-                        <h3 className="text-[10px] font-black tracking-[0.4em] text-zinc-500 uppercase mb-3 flex items-center justify-between">
-                            FLEET MANIFEST
-                            <RefreshCw className="h-3 w-3 animate-spin" style={{ animationDuration: '10s' }} />
-                        </h3>
-
-                        <div className="grid grid-cols-3 gap-2 mb-4">
-                            {[
-                                { label: 'SLOTS', value: `${poolStats.slots}/100` },
-                                { label: 'QUEUED', value: poolStats.queued },
-                                { label: 'BROWSERS', value: poolStats.browsers },
-                            ].map(({ label, value }) => (
-                                <div key={label} className="bg-black/40 rounded-lg p-2 text-center border border-white/5">
-                                    <div className="text-[8px] font-black tracking-widest text-zinc-600 uppercase">{label}</div>
-                                    <div className="text-sm font-black text-zinc-300 mt-0.5">{value}</div>
-                                </div>
-                            ))}
-                        </div>
-
-                        <div className="space-y-2 flex-1 overflow-y-auto">
-                            {poolStats.inUse === 0 && poolStats.spawning === 0 ? (
-                                <div className="text-zinc-700 text-[10px] font-black tracking-widest uppercase text-center py-6">
-                                    No active agents
-                                </div>
-                            ) : (
-                                <>
-                                    {Array.from({ length: Math.min(poolStats.inUse, 8) }).map((_, i) => (
-                                        <BotNode key={`active-${i}`} name={`AGENT-${i + 1}`} status="ACTIVE" type="Pool Slot" active />
-                                    ))}
-                                    {poolStats.spawning > 0 && (
-                                        <BotNode name="SPAWNING..." status="INIT" type="Launching" active={false} />
-                                    )}
-                                    {poolStats.inUse > 8 && (
-                                        <div className="text-zinc-600 text-[9px] font-black tracking-widest uppercase text-center py-1">
-                                            +{poolStats.inUse - 8} more active
-                                        </div>
-                                    )}
-                                </>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* ─── Software Fabricator ───────────────────────────────────────────── */}
-            <div className="bg-zinc-950 border border-white/5 rounded-2xl p-6 space-y-4">
-                <div className="flex items-center gap-3">
-                    <Cpu className="h-5 w-5 text-purple-400" />
-                    <h2 className="text-[11px] font-black tracking-[0.4em] text-zinc-400 uppercase">
-                        SOFTWARE FABRICATOR — Build Any Tool or Program
-                    </h2>
-                </div>
-
-                <div className="flex gap-3">
-                    <input
-                        value={softwareIntent}
-                        onChange={e => setSoftwareIntent(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && handleFabricate()}
-                        placeholder="Describe software to build... e.g. 'a scraper that extracts product prices from any URL'"
-                        className="flex-1 bg-black/60 border border-white/10 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-purple-500/50 font-mono"
-                        disabled={isFabricating}
-                    />
-                    <button
-                        onClick={handleFabricate}
-                        disabled={isFabricating || !softwareIntent.trim()}
-                        className="px-6 py-3 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white rounded-xl font-black text-xs tracking-widest uppercase transition-colors flex items-center gap-2"
-                    >
-                        {isFabricating
-                            ? <><Loader2 className="h-4 w-4 animate-spin" /> BUILDING...</>
-                            : <><Wrench className="h-4 w-4" /> FABRICATE</>
+                        {isAuditing
+                            ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Auditing</>
+                            : <><ShieldAlert className="h-3.5 w-3.5" /> Audit</>
                         }
                     </button>
+                    <button className="p-2.5 bg-zinc-950 border border-white/[0.06] rounded-xl hover:border-white/20 transition-all">
+                        <Settings className="h-4 w-4 text-zinc-500" />
+                    </button>
                 </div>
+            </header>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Fabricator log */}
-                    <div className="bg-black/40 border border-white/5 rounded-xl h-48 overflow-y-auto p-4 font-mono text-[11px]">
-                        {fabLogs.map((log, i) => (
-                            <div key={i} className="flex gap-2 mb-1">
-                                <span className="text-zinc-700 min-w-[20px]">{i + 1}</span>
-                                <span className="text-purple-300">{log}</span>
-                            </div>
-                        ))}
-                        <div ref={fabEndRef} />
-                    </div>
-
-                    {/* Built tools list */}
-                    <div className="space-y-2 overflow-y-auto max-h-48">
-                        {fabricated.length === 0 ? (
-                            <div className="text-zinc-700 text-[10px] font-black tracking-widest uppercase text-center py-6">
-                                No software built yet
-                            </div>
-                        ) : (
-                            fabricated.map((tool, i) => (
-                                <div key={i} className="flex items-center justify-between p-3 bg-black/40 border border-white/5 rounded-xl hover:border-purple-500/30 transition-all">
-                                    <div className="flex items-center gap-3">
-                                        <Code2 className="h-4 w-4 text-purple-400 shrink-0" />
-                                        <div>
-                                            <div className="text-xs font-black text-zinc-300">{tool.filename}</div>
-                                            <div className="text-[10px] text-zinc-600 truncate max-w-[200px]">{tool.description}</div>
-                                        </div>
+            <main className="p-8 space-y-6">
+                {/* ── Audit Results ── */}
+                {auditResults && (
+                    <div className="grid grid-cols-3 gap-3">
+                        {auditResults.map(r => (
+                            <div key={r.site} className={`flex items-center gap-3 p-4 rounded-xl border ${r.status === 'pass' ? 'bg-green-500/5 border-green-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
+                                {r.status === 'pass'
+                                    ? <CheckCircle2 className="h-4 w-4 text-green-400 shrink-0" />
+                                    : <XCircle className="h-4 w-4 text-red-400 shrink-0" />
+                                }
+                                <div>
+                                    <div className="text-xs font-bold text-white">{r.site}</div>
+                                    <div className={`text-[10px] font-bold tracking-widest uppercase ${r.status === 'pass' ? 'text-green-500' : 'text-red-400'}`}>
+                                        {r.status === 'pass' ? 'Undetected' : 'Detected'}
                                     </div>
-                                    <button
-                                        onClick={() => downloadTool(tool)}
-                                        className="p-2 bg-purple-600/20 hover:bg-purple-600/40 rounded-lg transition-colors"
-                                    >
-                                        <Download className="h-3.5 w-3.5 text-purple-400" />
-                                    </button>
                                 </div>
-                            ))
-                        )}
-                    </div>
-                </div>
-            </div>
-
-            {/* ─── Skill Inventory ──────────────────────────────────────────────── */}
-            <div className="bg-zinc-950 border border-white/5 rounded-2xl p-6 space-y-4">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <Package className="h-5 w-5 text-yellow-500" />
-                        <h2 className="text-[11px] font-black tracking-[0.4em] text-zinc-400 uppercase">
-                            SKILL REGISTRY — {skills.length} Persisted
-                        </h2>
-                    </div>
-                    <button
-                        onClick={fetchSkills}
-                        className="p-2 bg-zinc-900 border border-white/5 rounded-lg hover:bg-zinc-800 transition-colors"
-                    >
-                        {loadingSkills
-                            ? <Loader2 className="h-3.5 w-3.5 text-zinc-500 animate-spin" />
-                            : <RefreshCw className="h-3.5 w-3.5 text-zinc-500" />
-                        }
-                    </button>
-                </div>
-
-                {skills.length === 0 ? (
-                    <div className="text-zinc-700 text-[10px] font-black tracking-widest uppercase text-center py-8">
-                        No skills forged yet — use the Tactical Console above
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                        {skills.map(skill => (
-                            <div
-                                key={skill.id}
-                                className="flex items-center justify-between p-4 bg-black/40 border border-white/5 rounded-xl hover:border-yellow-500/30 transition-all group"
-                            >
-                                <div className="flex-1 min-w-0">
-                                    <div className="text-xs font-black text-zinc-200 group-hover:text-white transition-colors truncate">{skill.name}</div>
-                                    <div className="text-[10px] text-zinc-600 truncate">{skill.description}</div>
-                                    <div className="text-[9px] text-zinc-700 font-mono mt-1">{skill.id}</div>
-                                </div>
-                                <button
-                                    onClick={() => downloadSkill(skill)}
-                                    title={`Download ${skill.id}.ts`}
-                                    className="ml-3 p-2 bg-yellow-500/10 hover:bg-yellow-500/20 rounded-lg transition-colors shrink-0"
-                                >
-                                    <Download className="h-3.5 w-3.5 text-yellow-500" />
-                                </button>
                             </div>
                         ))}
                     </div>
                 )}
-            </div>
+
+                {/* ── Main Grid ── */}
+                <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+                    {/* Left 3 cols */}
+                    <div className="xl:col-span-3 space-y-6">
+                        <TacticalConsole onCommand={handleTacticalCommand} isForging={isForging} />
+
+                        <div className="grid grid-cols-2 gap-6">
+                            <LogWindow title="Mission Log" logs={logs} accent="text-zinc-300" dot="bg-red-500" scrollRef={logsEndRef} />
+                            <LogWindow title="Forge Blacksmith" logs={forgeLogs} accent="text-yellow-400" dot="bg-yellow-500" scrollRef={forgeEndRef} />
+                        </div>
+                    </div>
+
+                    {/* Sidebar */}
+                    <div className="space-y-4">
+                        <Card>
+                            <SectionLabel icon={Ghost} label="Fleet Manifest" />
+                            <div className="grid grid-cols-3 gap-2 mt-3 mb-3">
+                                {[
+                                    { label: 'Slots', value: `${poolStats.slots}/100` },
+                                    { label: 'Browsers', value: poolStats.browsers },
+                                    { label: 'Spawning', value: poolStats.spawning },
+                                ].map(({ label, value }) => (
+                                    <div key={label} className="text-center p-2 bg-black/40 rounded-lg border border-white/[0.04]">
+                                        <div className="text-[8px] font-bold tracking-widest text-zinc-600 uppercase">{label}</div>
+                                        <div className="text-sm font-black text-zinc-300 mt-0.5">{value}</div>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                                {poolStats.inUse === 0 && poolStats.spawning === 0 ? (
+                                    <div className="text-zinc-700 text-[10px] font-bold tracking-widest uppercase text-center py-6">No active agents</div>
+                                ) : (
+                                    Array.from({ length: Math.min(poolStats.inUse, 6) }).map((_, i) => (
+                                        <AgentRow key={i} name={`Agent-${i + 1}`} active />
+                                    ))
+                                )}
+                                {poolStats.inUse > 6 && (
+                                    <div className="text-zinc-600 text-[9px] font-bold uppercase text-center py-1">+{poolStats.inUse - 6} more</div>
+                                )}
+                            </div>
+                        </Card>
+
+                        <Card>
+                            <SectionLabel icon={Lock} label="Stealth Status" />
+                            <div className="space-y-2 mt-3">
+                                {[
+                                    { label: 'WebGL Masking', status: 'Active' },
+                                    { label: 'Canvas Noise', status: 'Active' },
+                                    { label: 'UA Spoofing', status: 'Active' },
+                                    { label: 'Human-Zero Mode', status: 'Active' },
+                                ].map(({ label, status }) => (
+                                    <div key={label} className="flex items-center justify-between">
+                                        <span className="text-[10px] text-zinc-500">{label}</span>
+                                        <span className="text-[9px] font-bold text-green-400 tracking-widest uppercase">{status}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </Card>
+                    </div>
+                </div>
+
+                {/* ── Skill Registry ── */}
+                <Card>
+                    <div className="flex items-center justify-between mb-5">
+                        <SectionLabel icon={Package} label={`Skill Registry — ${skills.length} saved`} />
+                        <button
+                            onClick={fetchSkills}
+                            className="p-2 rounded-lg bg-zinc-900 border border-white/[0.06] hover:border-white/20 transition-all"
+                        >
+                            {loadingSkills
+                                ? <Loader2 className="h-3.5 w-3.5 text-zinc-500 animate-spin" />
+                                : <RefreshCw className="h-3.5 w-3.5 text-zinc-500" />
+                            }
+                        </button>
+                    </div>
+
+                    {skills.length === 0 ? (
+                        <div className="text-zinc-700 text-[11px] font-bold tracking-widest uppercase text-center py-10">
+                            No skills forged yet — use the Tactical Console above
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                            {skills.map(skill => (
+                                <div key={skill.id} className="group flex items-center justify-between p-4 bg-black/40 border border-white/[0.06] rounded-xl hover:border-yellow-500/20 transition-all">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <div className="p-2 bg-yellow-500/10 rounded-lg shrink-0">
+                                            <Zap className="h-3.5 w-3.5 text-yellow-500" />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <div className="text-xs font-bold text-zinc-200 group-hover:text-white transition-colors truncate">{skill.name}</div>
+                                            <div className="text-[10px] text-zinc-600 truncate mt-0.5">{skill.description}</div>
+                                            <div className="text-[9px] text-zinc-700 font-mono mt-0.5 truncate">{skill.id}</div>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 ml-3 shrink-0">
+                                        <button
+                                            onClick={() => handleRunSkill(skill)}
+                                            disabled={runningSkillId !== null}
+                                            title="Run skill"
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/20 hover:border-yellow-500/40 rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                        >
+                                            {runningSkillId === skill.id
+                                                ? <Loader2 className="h-3 w-3 text-yellow-400 animate-spin" />
+                                                : <Play className="h-3 w-3 text-yellow-400" />
+                                            }
+                                            <span className="text-[9px] font-bold text-yellow-400 uppercase tracking-wider">
+                                                {runningSkillId === skill.id ? 'Running' : 'Run'}
+                                            </span>
+                                        </button>
+                                        <button
+                                            onClick={() => window.open(`/api/skills/${skill.id}/download`, '_blank')}
+                                            title="Download skill"
+                                            className="p-2 bg-zinc-900 hover:bg-zinc-800 border border-white/[0.06] hover:border-white/20 rounded-lg transition-all"
+                                        >
+                                            <Download className="h-3 w-3 text-zinc-400" />
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Result Panel */}
+                    {skillResult && (
+                        <div className={`mt-4 rounded-xl border overflow-hidden ${skillResult.error ? 'border-red-500/30' : 'border-green-500/20'}`}>
+                            <div className={`flex items-center justify-between px-4 py-2.5 ${skillResult.error ? 'bg-red-500/10' : 'bg-green-500/5'}`}>
+                                <div className="flex items-center gap-2">
+                                    <Terminal className="h-3.5 w-3.5 text-zinc-400" />
+                                    <span className="text-[10px] font-bold tracking-widest uppercase text-zinc-300">
+                                        Last Run: {skillResult.name}
+                                    </span>
+                                    {skillResult.error
+                                        ? <span className="text-[9px] font-bold text-red-400 uppercase tracking-widest">Failed</span>
+                                        : <span className="text-[9px] font-bold text-green-400 uppercase tracking-widest">Success</span>
+                                    }
+                                    {!skillResult.error && skillResult.truncated && (
+                                        <span className="text-[9px] font-bold text-yellow-400 uppercase tracking-widest">Truncated</span>
+                                    )}
+                                </div>
+                                <button onClick={() => setSkillResult(null)} className="text-zinc-600 hover:text-zinc-300 transition-colors">
+                                    <X className="h-3.5 w-3.5" />
+                                </button>
+                            </div>
+                            <div className="bg-black/60 p-4 max-h-72 overflow-y-auto font-mono text-[11px] text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                                {skillResult.error
+                                    ? <span className="text-red-400">{skillResult.error}</span>
+                                    : (typeof skillResult.data === 'string'
+                                        ? skillResult.data
+                                        : JSON.stringify(skillResult.data, null, 2))
+                                }
+                            </div>
+                        </div>
+                    )}
+                </Card>
+
+                {/* ── Software Fabricator ── */}
+                <Card>
+                    <div className="flex items-center gap-3 mb-5">
+                        <SectionLabel icon={Cpu} label="Software Fabricator" accent="text-violet-400" />
+                        <span className="text-[10px] text-zinc-600">Build any standalone tool or script</span>
+                    </div>
+
+                    <div className="flex gap-3 mb-4">
+                        <input
+                            value={softwareIntent}
+                            onChange={e => setSoftwareIntent(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && handleFabricate()}
+                            placeholder="Describe software to build... e.g. a script that monitors URLs for changes"
+                            className="flex-1 bg-black/60 border border-white/[0.08] rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder:text-zinc-700 focus:outline-none focus:border-violet-500/40 font-mono transition-all"
+                            disabled={isFabricating}
+                        />
+                        <button
+                            onClick={handleFabricate}
+                            disabled={isFabricating || !softwareIntent.trim()}
+                            className="px-5 py-3 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white rounded-xl font-bold text-xs tracking-widest uppercase transition-colors flex items-center gap-2"
+                        >
+                            {isFabricating
+                                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Building</>
+                                : <><Wrench className="h-3.5 w-3.5" /> Build</>
+                            }
+                        </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="bg-black/40 border border-white/[0.04] rounded-xl h-44 overflow-y-auto p-4 font-mono text-[11px]">
+                            {fabLogs.map((log, i) => (
+                                <div key={i} className="flex gap-2 mb-1">
+                                    <span className="text-zinc-800 min-w-[20px]">{i + 1}</span>
+                                    <span className="text-violet-300">{log}</span>
+                                </div>
+                            ))}
+                            <div ref={fabEndRef} />
+                        </div>
+                        <div className="space-y-2 overflow-y-auto max-h-44">
+                            {fabricated.length === 0 ? (
+                                <div className="text-zinc-700 text-[10px] font-bold tracking-widest uppercase text-center py-8">No software built yet</div>
+                            ) : (
+                                fabricated.map((tool, i) => (
+                                    <div key={i} className="flex items-center justify-between p-3 bg-black/40 border border-white/[0.06] rounded-xl hover:border-violet-500/20 transition-all">
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            <Code2 className="h-4 w-4 text-violet-400 shrink-0" />
+                                            <div className="min-w-0">
+                                                <div className="text-xs font-bold text-zinc-300 truncate">{tool.filename}</div>
+                                                <div className="text-[10px] text-zinc-600 truncate">{tool.description}</div>
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() => window.open(tool.downloadUrl, '_blank')}
+                                            className="ml-3 p-2 bg-violet-600/20 hover:bg-violet-600/40 rounded-lg transition-colors shrink-0"
+                                        >
+                                            <Download className="h-3.5 w-3.5 text-violet-400" />
+                                        </button>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </Card>
+            </main>
         </div>
     )
 }
 
-// ─── Sub-components ────────────────────────────────────────────────────────────
+// ── Sub-components ──────────────────────────────────────────────────────────
 
-function TerminalWindow({ title, logs, color, dot, scrollRef }: {
-    title: string; logs: string[]; color: string; dot: string; scrollRef: React.RefObject<HTMLDivElement | null>
+function Card({ children }: { children: React.ReactNode }) {
+    return (
+        <div className="bg-zinc-950 border border-white/[0.06] rounded-2xl p-6">
+            {children}
+        </div>
+    )
+}
+
+function SectionLabel({ icon: Icon, label, accent = 'text-zinc-400' }: { icon: React.ElementType; label: string; accent?: string }) {
+    return (
+        <div className="flex items-center gap-2">
+            <Icon className={`h-4 w-4 ${accent}`} />
+            <span className={`text-[10px] font-black tracking-[0.3em] uppercase ${accent}`}>{label}</span>
+        </div>
+    )
+}
+
+function Stat({ label, value, color }: { label: string; value: string | number; color: string }) {
+    return (
+        <div className="text-center">
+            <div className="text-[8px] font-bold tracking-widest text-zinc-600 uppercase">{label}</div>
+            <div className={`text-sm font-black ${color}`}>{value}</div>
+        </div>
+    )
+}
+
+function LogWindow({ title, logs, accent, dot, scrollRef }: {
+    title: string; logs: string[]; accent: string; dot: string; scrollRef: React.RefObject<HTMLDivElement | null>
 }) {
     return (
-        <div className="bg-zinc-950 border border-white/5 rounded-2xl flex flex-col overflow-hidden h-[450px]">
-            <div className="px-5 py-3 border-b border-white/5 bg-white/2 flex justify-between items-center">
-                <span className="text-[10px] font-black tracking-[0.3em] text-zinc-400 flex items-center gap-2">
-                    <div className={`h-1.5 w-1.5 rounded-full ${dot} animate-pulse`} />
-                    {title}
-                </span>
-                <div className="flex gap-2">
+        <div className="bg-zinc-950 border border-white/[0.06] rounded-2xl flex flex-col overflow-hidden h-[400px]">
+            <div className="px-5 py-3 border-b border-white/[0.06] flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <span className={`h-1.5 w-1.5 rounded-full ${dot} animate-pulse`} />
+                    <span className="text-[10px] font-black tracking-[0.3em] text-zinc-500 uppercase">{title}</span>
+                </div>
+                <div className="flex gap-1.5">
                     <div className="h-2 w-2 rounded-full bg-zinc-800" />
                     <div className="h-2 w-2 rounded-full bg-zinc-800" />
                     <div className="h-2 w-2 rounded-full bg-zinc-800" />
                 </div>
             </div>
-            <div className="p-5 font-mono text-[11px] leading-relaxed overflow-y-auto flex-1 bg-black/20">
+            <div className="p-4 font-mono text-[11px] leading-relaxed overflow-y-auto flex-1 bg-black/20 space-y-0.5">
                 {logs.map((log, i) => (
-                    <div key={i} className="flex gap-3 mb-1">
+                    <div key={i} className="flex gap-3">
                         <span className="text-zinc-800 font-bold min-w-[20px] select-none">{i + 1}</span>
-                        <span className={color}>{log}</span>
+                        <span className={accent}>{log}</span>
                     </div>
                 ))}
                 <div ref={scrollRef} />
-                <div className="flex items-center gap-1 mt-2 animate-pulse">
-                    <div className="h-3 w-1.5 bg-yellow-500 ml-8" />
-                </div>
             </div>
         </div>
     )
 }
 
-function StatCardSmall({ title, value, color, icon: Icon }: {
-    title: string; value: string | number; color: string; icon: React.ElementType
-}) {
+function AgentRow({ name, active }: { name: string; active: boolean }) {
     return (
-        <div className="bg-zinc-950 border border-white/5 rounded-xl p-5 flex items-center justify-between hover:border-white/10 transition-all">
-            <div className="flex flex-col">
-                <span className="text-[9px] font-black tracking-widest text-zinc-600 uppercase mb-1">{title}</span>
-                <span className={`text-2xl font-black tracking-tighter ${color}`}>{value}</span>
-            </div>
-            <div className="p-2.5 rounded-lg bg-white/2 border border-white/5">
-                <Icon className={`h-4 w-4 ${color}`} />
-            </div>
-        </div>
-    )
-}
-
-function BotNode({ name, status, type, active }: { name: string; status: string; type: string; active: boolean }) {
-    return (
-        <div className="flex items-center justify-between p-2.5 rounded-xl bg-black/40 border border-white/5 hover:border-yellow-500/20 transition-all group cursor-pointer">
+        <div className="flex items-center justify-between p-2.5 bg-black/40 border border-white/[0.04] rounded-xl">
             <div className="flex items-center gap-2.5">
-                <div className="h-7 w-7 rounded-lg bg-zinc-900 flex items-center justify-center border border-white/5">
-                    <Ghost className={`h-3.5 w-3.5 ${active ? 'text-yellow-500' : 'text-zinc-600'}`} />
+                <div className="h-6 w-6 rounded-lg bg-zinc-900 flex items-center justify-center border border-white/[0.06]">
+                    <Ghost className={`h-3 w-3 ${active ? 'text-yellow-500' : 'text-zinc-600'}`} />
                 </div>
-                <div className="flex flex-col">
-                    <span className="text-[11px] font-black tracking-tight text-zinc-300">{name}</span>
-                    <span className="text-[9px] font-medium text-zinc-600 uppercase">{type}</span>
-                </div>
+                <span className="text-[11px] font-bold text-zinc-400">{name}</span>
             </div>
-            <div className="flex flex-col items-end gap-0.5">
-                <span className={`text-[9px] font-black tracking-widest ${active ? 'text-yellow-500' : 'text-zinc-600'}`}>{status}</span>
-                <ChevronRight className="h-3 w-3 text-zinc-800 group-hover:text-white transition-colors" />
+            <div className="flex items-center gap-1.5">
+                <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-yellow-500 animate-pulse' : 'bg-zinc-700'}`} />
+                <span className={`text-[9px] font-bold tracking-widest uppercase ${active ? 'text-yellow-500' : 'text-zinc-600'}`}>
+                    {active ? 'Active' : 'Idle'}
+                </span>
+                <ChevronRight className="h-3 w-3 text-zinc-700" />
             </div>
         </div>
     )
