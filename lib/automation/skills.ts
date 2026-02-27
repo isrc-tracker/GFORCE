@@ -9,7 +9,7 @@ export interface Skill {
     id: string;
     name: string;
     description: string;
-    execute(ctx: SkillContext, ...args: any[]): Promise<any>;
+    execute(ctx: SkillContext, botToken?: string, chatId?: number, ...args: any[]): Promise<any>;
 }
 
 export abstract class BaseSkill implements Skill {

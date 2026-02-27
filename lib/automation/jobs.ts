@@ -73,7 +73,8 @@ async function processJob(job: Job, skill: any) {
     try {
         const slot = await pool.acquire({ accountId: job.accountId, timeoutMs: 120_000 });
         try {
-            const result = await skill.execute({ page: slot.page, context: slot.context });
+            const botToken = process.env.TELEGRAM_BOT_TOKEN;
+            const result = await skill.execute({ page: slot.page, context: slot.context }, botToken, job.chatId);
             job.status = 'completed';
             job.result = result;
             job.completedAt = new Date().toISOString();

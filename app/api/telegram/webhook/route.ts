@@ -181,7 +181,8 @@ async function handleCommand(chatId: number, text: string): Promise<void> {
         const slot = await pool.acquire({ accountId, timeoutMs: 60_000 })
         try {
             const { Monitor } = await import('@/lib/automation/monitor')
-            const result = await skill.execute({ page: slot.page, context: slot.context })
+            const botToken = process.env.TELEGRAM_BOT_TOKEN
+            const result = await skill.execute({ page: slot.page, context: slot.context }, botToken, chatId)
             const json = typeof result === 'string' ? result : (JSON.stringify(result, null, 2) ?? String(result))
 
             Monitor.recordResult(domain, true)
