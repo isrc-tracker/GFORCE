@@ -292,16 +292,16 @@ Example:
             }
 
             // Smarter field mapping with fallbacks
-            const body = data.executeBody || data.execute_body || data.code || data.script
+            const body = data.executeBody || data.execute_body || data.code || data.script || data.automation_code
             let id = data.id || data.skillId || data.skill_id
-            let name = data.name || data.skillName || data.skill_name
+            let name = data.name || data.skillName || data.skill_name || intent.slice(0, 32)
             let desc = data.description || data.desc || data.about
 
             if (!body) {
-                console.error('[Forge] ❌ Missing executeBody in AI response')
+                console.error('[Forge] ❌ Missing script body in AI response. Keys found:', Object.keys(data))
                 console.log('--- RAW AI RESPONSE ---')
                 console.log(response)
-                throw new Error('Incomplete skill schema: executeBody is missing')
+                throw new Error('Incomplete skill schema: script body is missing')
             }
 
             // Fallbacks for metadata if code is present
