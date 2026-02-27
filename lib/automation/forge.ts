@@ -276,14 +276,24 @@ Example:
         try {
             const response = await executeWithClaude(prompt, systemPrompt)
             const data = parseJsonObjectFromModel(response)
-            const body = data.executeBody || data.execute_body || data.code
-            const id = data.id || data.skillId
-            const name = data.name || data.skillName
-            const desc = data.description || data.desc
 
-            if (!id || !name || !desc || !body) {
-                throw new Error('Incomplete skill schema in AI response')
+            // Smarter field mapping with fallbacks
+            const body = data.executeBody || data.execute_body || data.code || data.script
+            let id = data.id || data.skillId || data.skill_id
+            let name = data.name || data.skillName || data.skill_name
+            let desc = data.description || data.desc || data.about
+
+            if (!body) {
+                console.error('[Forge] ❌ Missing executeBody in AI response')
+                console.log('--- RAW AI RESPONSE ---')
+                console.log(response)
+                throw new Error('Incomplete skill schema: executeBody is missing')
             }
+
+            // Fallbacks for metadata if code is present
+            if (!id) id = `skill-${Math.random().toString(36).slice(2, 8)}`
+            if (!name) name = `Forged Skill ${id}`
+            if (!desc) desc = `AI-generated skill for: ${safeIntent}`
 
             data.id = id
             data.name = name
@@ -291,7 +301,7 @@ Example:
             data.executeBody = body
 
             // Sanitize ID — no path traversal or injection
-            data.id = String(data.id).replace(/[^\w\-]/g, '-').slice(0, 64)
+            data.id = String(data.id).replace(/[^\w\-]/g, '-').toLowerCase().slice(0, 64)
 
             // validateExecuteBody runs inside DynamicSkill constructor
             const skill = new DynamicSkill(data.id, data.name, data.description, data.executeBody)
@@ -309,7 +319,7 @@ Example:
             return skill
         } catch (err) {
             const msg = (err as Error).message
-            console.error('[Forge] ❌ Blacksmithing failed:', msg.startsWith('Security') ? 'code validation rejected' : msg)
+            console.error('[Forge] ❌ Blacksmithing failed:', msg)
             throw err
         }
     }
