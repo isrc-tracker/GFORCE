@@ -160,6 +160,13 @@ function extractJsonObjectCandidates(text: string): string[] {
 function repairJson(json: string): string {
     let repaired = json.trim()
 
+    // Fix: If AI uses backticks for multi-line strings (illegal in JSON)
+    // We attempt to convert them to double quotes and escape newlines inside
+    repaired = repaired.replace(/:[ \t]*`([\s\S]*?)`/g, (match, p1) => {
+        const escaped = p1.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/"/g, '\\"')
+        return `: "${escaped}"`
+    })
+
     // 1. Handle unescaped newlines in strings (common Claude error)
     // This finds a quote, then non-quote characters (including newlines), then a quote
     // and replaces actual newlines with \n
