@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import {
-    Zap, ShieldAlert, Loader2,
+    Zap, ShieldAlert, Loader2, Search, Menu, MoreHorizontal,
     Link2, Database, Code2, FileText, LayoutGrid, Play,
     CheckCircle2, Circle, XCircle, ArrowRight, X,
 } from 'lucide-react'
@@ -16,36 +16,26 @@ function authFetch(url: string, init?: RequestInit) {
 }
 
 interface SessionResult {
-    id: string
-    name: string
-    prompt: string
+    id: string; name: string; prompt: string
     category: 'links' | 'data' | 'code' | 'documents' | 'video'
-    data: any
-    error?: string
-    truncated?: boolean
-    createdAt: number
+    data: any; error?: string; truncated?: boolean; createdAt: number
 }
-
-interface ActivityStep {
-    label: string
-    status: 'pending' | 'active' | 'done' | 'error'
-}
-
-interface AuditSite { site: string; status: 'pass' | 'fail'; title?: string; error?: string }
+interface ActivityStep { label: string; status: 'pending' | 'active' | 'done' | 'error' }
+interface AuditSite { site: string; status: 'pass' | 'fail' }
 
 const CATEGORIES = [
-    { id: 'all',       label: 'All',   icon: LayoutGrid, bg: 'bg-zinc-700'   },
-    { id: 'links',     label: 'Links', icon: Link2,      bg: 'bg-blue-600'   },
-    { id: 'data',      label: 'Data',  icon: Database,   bg: 'bg-green-600'  },
-    { id: 'code',      label: 'Code',  icon: Code2,      bg: 'bg-violet-600' },
-    { id: 'documents', label: 'Docs',  icon: FileText,   bg: 'bg-orange-600' },
-    { id: 'video',     label: 'Video', icon: Play,       bg: 'bg-red-600'    },
+    { id: 'all',       label: 'All',   icon: LayoutGrid, gradient: 'from-pink-500 to-rose-500'     },
+    { id: 'links',     label: 'Links', icon: Link2,      gradient: 'from-cyan-400 to-teal-500'     },
+    { id: 'data',      label: 'Data',  icon: Database,   gradient: 'from-violet-500 to-purple-600' },
+    { id: 'code',      label: 'Code',  icon: Code2,      gradient: 'from-blue-500 to-blue-700'     },
+    { id: 'documents', label: 'Docs',  icon: FileText,   gradient: 'from-orange-400 to-orange-600' },
+    { id: 'video',     label: 'Video', icon: Play,       gradient: 'from-green-400 to-emerald-500' },
 ]
 
 function categorize(data: any): SessionResult['category'] {
     if (!data) return 'data'
     const str = typeof data === 'string' ? data : JSON.stringify(data)
-    if (/youtube\.com|vimeo\.com|\.mp4|\.webm|\/video\//i.test(str)) return 'video'
+    if (/youtube\.com|vimeo\.com|\.mp4|\.webm/i.test(str)) return 'video'
     if (/https?:\/\//.test(str)) return 'links'
     if (typeof data === 'string' && str.length > 500 && !str.trimStart().startsWith('{') && !str.trimStart().startsWith('[')) return 'documents'
     return 'data'
@@ -53,9 +43,20 @@ function categorize(data: any): SessionResult['category'] {
 
 const SUGGESTIONS = [
     'Scrape top 10 Hacker News titles and scores',
-    'Get top 5 Amazon results for mechanical keyboards',
+    'Get top 5 results from GitHub trending',
     'Extract all links from news.ycombinator.com',
 ]
+
+function Badge({ status }: { status: ActivityStep['status'] }) {
+    const map = {
+        done:    { bg: 'bg-emerald-50 text-emerald-600', label: 'Done'    },
+        active:  { bg: 'bg-blue-50 text-blue-500',       label: 'Running' },
+        pending: { bg: 'bg-gray-100 text-gray-400',      label: 'Waiting' },
+        error:   { bg: 'bg-red-50 text-red-500',         label: 'Failed'  },
+    }
+    const { bg, label } = map[status]
+    return <span className={`text-[10px] font-semibold px-2.5 py-1 rounded-full shrink-0 ${bg}`}>{label}</span>
+}
 
 export default function GForce() {
     const [prompt, setPrompt] = useState('')
@@ -65,7 +66,7 @@ export default function GForce() {
     const [results, setResults] = useState<SessionResult[]>([])
     const [selectedCategory, setSelectedCategory] = useState('all')
     const [selectedResult, setSelectedResult] = useState<SessionResult | null>(null)
-    const [poolStats, setPoolStats] = useState({ inUse: 0, idle: 0, queued: 0 })
+    const [poolStats, setPoolStats] = useState({ inUse: 0, idle: 0 })
     const [isAuditing, setIsAuditing] = useState(false)
 
     const promptRef = useRef<HTMLInputElement>(null)
@@ -78,7 +79,7 @@ export default function GForce() {
                 const res = await authFetch('/api/pool/stats')
                 if (res.ok) {
                     const d = await res.json()
-                    setPoolStats({ inUse: d.inUse ?? 0, idle: d.idle ?? 0, queued: d.queued ?? 0 })
+                    setPoolStats({ inUse: d.inUse ?? 0, idle: d.idle ?? 0 })
                 }
             } catch { }
         }
@@ -100,9 +101,9 @@ export default function GForce() {
         setActiveTask(intent)
         setSelectedResult(null)
         setActivitySteps([
-            { label: 'Analyzing prompt', status: 'active' },
+            { label: 'Analyzing prompt',            status: 'active'  },
             { label: 'Generating automation skill', status: 'pending' },
-            { label: 'Running in browser', status: 'pending' },
+            { label: 'Running in browser',          status: 'pending' },
         ])
         clearTimers()
         timers.current.push(setTimeout(() => setActivitySteps(s => [
@@ -123,9 +124,9 @@ export default function GForce() {
 
             if (data.success) {
                 setActivitySteps([
-                    { label: 'Analyzing prompt', status: 'done' },
+                    { label: 'Analyzing prompt',            status: 'done' },
                     { label: 'Generating automation skill', status: 'done' },
-                    { label: 'Running in browser', status: 'done' },
+                    { label: 'Running in browser',          status: 'done' },
                 ])
                 const result: SessionResult = {
                     id: `${data.skill.id}-${Date.now()}`,
@@ -173,9 +174,9 @@ export default function GForce() {
         setActiveTask('Stealth Fingerprint Audit')
         setSelectedResult(null)
         setActivitySteps([
-            { label: 'SannySoft fingerprint test', status: 'active' },
-            { label: 'BrowserScan analysis', status: 'pending' },
-            { label: 'CreepJS evaluation', status: 'pending' },
+            { label: 'SannySoft fingerprint test', status: 'active'  },
+            { label: 'BrowserScan analysis',       status: 'pending' },
+            { label: 'CreepJS evaluation',         status: 'pending' },
         ])
         clearTimers()
         timers.current.push(setTimeout(() => setActivitySteps(s => [
@@ -219,26 +220,37 @@ export default function GForce() {
 
     const busy = isRunning || isAuditing
     const hasActivity = activitySteps.length > 0
+    const todaySteps = activitySteps.filter(s => s.status !== 'pending')
+    const upcomingSteps = activitySteps.filter(s => s.status === 'pending')
 
     return (
-        <div className="h-screen bg-[#0d0d14] text-white font-sans flex overflow-hidden">
+        <div className="h-screen flex overflow-hidden font-sans">
             <Toaster position="top-right" theme="dark" richColors />
 
             {/* ══ LEFT PANEL ══ */}
-            <div className="w-[320px] shrink-0 border-r border-white/[0.06] flex flex-col overflow-hidden p-5 gap-5">
+            <div className="w-[300px] shrink-0 bg-[#1e2240] flex flex-col overflow-hidden p-6 gap-5">
 
-                {/* Logo */}
-                <div className="flex items-center gap-2.5">
-                    <Zap className="h-5 w-5 text-yellow-400 fill-yellow-400 drop-shadow-[0_0_10px_rgba(234,179,8,0.5)]" />
-                    <span className="text-sm font-black tracking-[0.18em] uppercase">G-Force</span>
-                    <div className="ml-auto flex items-center gap-1.5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
-                        <span className="text-[9px] font-bold tracking-[0.2em] text-green-400 uppercase">Online</span>
+                {/* Top bar */}
+                <div className="flex items-center justify-between">
+                    <Menu className="h-5 w-5 text-[#4a5080] cursor-pointer hover:text-white transition-colors" />
+                    <div className="flex items-center gap-1.5">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        <span className="text-[9px] font-bold tracking-widest text-emerald-400 uppercase">Online</span>
                     </div>
                 </div>
 
-                {/* Prompt Input */}
+                {/* Greeting */}
+                <div>
+                    <div className="flex items-center gap-2 mb-1">
+                        <Zap className="h-5 w-5 text-yellow-400 fill-yellow-400 drop-shadow-[0_0_8px_rgba(234,179,8,0.5)]" />
+                        <h1 className="text-2xl font-bold text-white">G-Force</h1>
+                    </div>
+                    <p className="text-[12px] text-[#4a5080] leading-relaxed">Your autonomous automation engine.</p>
+                </div>
+
+                {/* Prompt input */}
                 <div className="relative">
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#4a5080]" />
                     <input
                         ref={promptRef}
                         value={prompt}
@@ -246,12 +258,12 @@ export default function GForce() {
                         onKeyDown={e => e.key === 'Enter' && handleRun()}
                         disabled={busy}
                         placeholder="What do you want to automate?"
-                        className="w-full bg-white/[0.04] border border-white/[0.08] rounded-2xl px-4 py-3.5 pr-14 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-yellow-500/40 focus:ring-1 focus:ring-yellow-500/10 disabled:opacity-50 transition-all"
+                        className="w-full bg-[#252844] rounded-2xl pl-10 pr-12 py-3 text-sm text-white placeholder:text-[#4a5080] focus:outline-none disabled:opacity-50 transition-all"
                     />
                     <button
                         onClick={handleRun}
                         disabled={busy || !prompt.trim()}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 bg-yellow-500 hover:bg-yellow-400 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-colors shadow-[0_0_16px_rgba(234,179,8,0.25)]"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-yellow-500 hover:bg-yellow-400 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-colors"
                     >
                         {isRunning
                             ? <Loader2 className="h-3.5 w-3.5 text-black animate-spin" />
@@ -260,60 +272,60 @@ export default function GForce() {
                     </button>
                 </div>
 
-                {/* Category Folders */}
+                {/* Category label */}
                 <div>
-                    <p className="text-[9px] font-bold tracking-[0.22em] text-zinc-600 uppercase mb-3">
-                        Saved · {results.length}
-                    </p>
-                    <div className="grid grid-cols-3 gap-2">
-                        {CATEGORIES.map(cat => (
-                            <button
-                                key={cat.id}
-                                onClick={() => setSelectedCategory(cat.id)}
-                                className={`flex flex-col items-center gap-1.5 p-3 rounded-2xl border transition-all ${selectedCategory === cat.id
-                                    ? 'border-yellow-500/30 bg-yellow-500/5'
-                                    : 'border-transparent bg-white/[0.03] hover:bg-white/[0.05]'
-                                }`}
-                            >
-                                <div className={`h-9 w-9 rounded-xl ${cat.bg} flex items-center justify-center`}>
-                                    <cat.icon className="h-4 w-4 text-white" />
-                                </div>
-                                <span className="text-[8px] font-bold text-zinc-500 uppercase tracking-wide">{cat.label}</span>
-                                <span className="text-sm font-black text-zinc-300 leading-none">{counts[cat.id]}</span>
-                            </button>
-                        ))}
+                    <p className="text-[11px] font-semibold text-[#4a5080] mb-3">Saved · {results.length}</p>
+
+                    {/* Icon grid */}
+                    <div className="grid grid-cols-3 gap-3">
+                        {CATEGORIES.map(cat => {
+                            const isSelected = selectedCategory === cat.id
+                            return (
+                                <button
+                                    key={cat.id}
+                                    onClick={() => setSelectedCategory(cat.id)}
+                                    className="flex flex-col items-center gap-1.5 group"
+                                >
+                                    <div className={`relative h-[68px] w-[68px] rounded-2xl bg-gradient-to-br ${cat.gradient} flex items-center justify-center transition-all ${
+                                        isSelected
+                                            ? 'ring-2 ring-white ring-offset-2 ring-offset-[#1e2240] shadow-xl'
+                                            : 'opacity-75 hover:opacity-100'
+                                    }`}>
+                                        <cat.icon className="h-6 w-6 text-white" />
+                                        {isSelected && (
+                                            <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-white shadow" />
+                                        )}
+                                    </div>
+                                    <span className="text-[10px] text-[#4a5080] group-hover:text-[#8a90b8] transition-colors">{cat.label}</span>
+                                    <span className="text-xs font-bold text-white leading-none -mt-1">{counts[cat.id]}</span>
+                                </button>
+                            )
+                        })}
                     </div>
                 </div>
 
-                {/* Result Items */}
-                <div className="flex-1 overflow-y-auto min-h-0 space-y-1.5">
+                {/* Result items */}
+                <div className="flex-1 overflow-y-auto min-h-0 space-y-0.5">
                     {filteredResults.length === 0 ? (
-                        <div className="py-8 text-center text-[9px] font-bold tracking-[0.2em] text-zinc-700 uppercase">
+                        <p className="text-[10px] text-[#2e3356] text-center py-4 uppercase tracking-widest font-bold">
                             {results.length === 0 ? 'No results yet' : 'Empty category'}
-                        </div>
+                        </p>
                     ) : filteredResults.map(r => {
                         const cat = CATEGORIES.find(c => c.id === r.category) ?? CATEGORIES[0]
-                        const isSelected = selectedResult?.id === r.id
                         return (
                             <button
                                 key={r.id}
                                 onClick={() => setSelectedResult(r)}
-                                className={`w-full text-left p-3 rounded-xl border transition-all ${isSelected
-                                    ? 'border-yellow-500/30 bg-yellow-500/5'
-                                    : 'border-transparent bg-white/[0.02] hover:bg-white/[0.04]'
+                                className={`w-full text-left px-3 py-2.5 rounded-xl transition-all flex items-center gap-2.5 ${
+                                    selectedResult?.id === r.id ? 'bg-white/10 text-white' : 'hover:bg-white/5 text-[#8a90b8]'
                                 }`}
                             >
-                                <div className="flex items-center gap-2.5">
-                                    <div className={`h-7 w-7 rounded-lg flex items-center justify-center shrink-0 ${r.error ? 'bg-red-500/20' : cat.bg}`}>
-                                        {r.error
-                                            ? <XCircle className="h-3 w-3 text-red-400" />
-                                            : <cat.icon className="h-3 w-3 text-white" />
-                                        }
-                                    </div>
-                                    <div className="min-w-0">
-                                        <div className="text-[11px] font-semibold text-zinc-300 truncate">{r.name}</div>
-                                        <div className="text-[9px] text-zinc-600 truncate mt-0.5">{r.prompt}</div>
-                                    </div>
+                                <div className={`h-6 w-6 rounded-lg bg-gradient-to-br ${r.error ? 'from-red-500 to-red-600' : cat.gradient} flex items-center justify-center shrink-0`}>
+                                    {r.error ? <XCircle className="h-3 w-3 text-white" /> : <cat.icon className="h-3 w-3 text-white" />}
+                                </div>
+                                <div className="min-w-0">
+                                    <div className="text-[11px] font-semibold truncate">{r.name}</div>
+                                    <div className="text-[9px] opacity-50 truncate mt-0.5">{r.prompt}</div>
                                 </div>
                             </button>
                         )
@@ -321,135 +333,136 @@ export default function GForce() {
                 </div>
 
                 {/* Footer */}
-                <div className="flex items-center gap-2 pt-3 border-t border-white/[0.06]">
-                    <span className="h-1.5 w-1.5 rounded-full bg-zinc-700 shrink-0" />
-                    <span className="text-[9px] text-zinc-700 font-mono tabular-nums">
-                        {poolStats.inUse} active · {poolStats.idle} idle
-                    </span>
+                <div className="flex items-center justify-between pt-3 border-t border-white/[0.05]">
+                    <span className="text-[9px] text-[#2e3356] font-mono">{poolStats.inUse} active · {poolStats.idle} idle</span>
                     <button
                         onClick={runAudit}
                         disabled={busy}
-                        className="ml-auto flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.15em] text-zinc-600 hover:text-zinc-300 disabled:opacity-40 transition-colors"
+                        className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest text-[#2e3356] hover:text-[#8a90b8] disabled:opacity-40 transition-colors"
                     >
-                        {isAuditing
-                            ? <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                            : <ShieldAlert className="h-2.5 w-2.5" />
-                        }
+                        {isAuditing ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <ShieldAlert className="h-2.5 w-2.5" />}
                         Audit
                     </button>
                 </div>
             </div>
 
             {/* ══ RIGHT PANEL ══ */}
-            <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="flex-1 bg-white flex flex-col overflow-hidden">
 
                 {/* Header */}
-                <div className="px-8 py-6 border-b border-white/[0.06]">
-                    <h2 className="text-xl font-bold leading-tight truncate">
+                <div className="px-8 pt-8 pb-5">
+                    <h2 className="text-2xl font-bold text-gray-900 truncate leading-tight">
                         {activeTask ?? 'Command Center'}
                     </h2>
-                    <p className="text-[11px] text-zinc-500 mt-1">
-                        {isRunning ? 'In progress...' :
-                            isAuditing ? 'Running stealth audit (60–90s)...' :
-                            hasActivity && activitySteps.some(s => s.status === 'error') ? 'Task failed' :
-                            hasActivity ? 'Completed' :
-                            'Waiting for input'}
+                    <p className="text-sm text-gray-400 mt-1">
+                        {isRunning    ? 'Working on it...' :
+                         isAuditing   ? 'Running stealth audit...' :
+                         hasActivity && activitySteps.some(s => s.status === 'error') ? 'Task failed' :
+                         hasActivity  ? 'Completed successfully' :
+                         'Type a prompt on the left to begin'}
                     </p>
                 </div>
 
                 {/* Body */}
-                <div className="flex-1 overflow-y-auto p-8">
+                <div className="flex-1 overflow-y-auto px-8 pb-8">
                     {!hasActivity && !selectedResult ? (
 
-                        /* Idle / Empty State */
-                        <div className="flex flex-col items-center justify-center h-full text-center">
-                            <div className="h-16 w-16 rounded-3xl bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center mb-5">
-                                <Zap className="h-8 w-8 text-yellow-500/50" />
-                            </div>
-                            <h3 className="text-base font-bold text-zinc-400 mb-2">Ready to automate</h3>
-                            <p className="text-sm text-zinc-600 max-w-xs leading-relaxed mb-6">
-                                Type a prompt on the left and hit Enter. G-Force will forge a skill and run it instantly.
-                            </p>
-                            <div className="flex flex-col gap-2 w-full max-w-sm">
-                                {SUGGESTIONS.map(s => (
-                                    <button
-                                        key={s}
-                                        onClick={() => { setPrompt(s); promptRef.current?.focus() }}
-                                        className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 bg-white/[0.03] border border-white/[0.06] rounded-xl hover:border-yellow-500/30 hover:text-zinc-300 transition-all text-left"
-                                    >
-                                        {s}
-                                    </button>
-                                ))}
-                            </div>
+                        /* Idle */
+                        <div className="flex flex-col items-start gap-2 pt-2">
+                            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest mb-1">Try these</p>
+                            {SUGGESTIONS.map(s => (
+                                <button
+                                    key={s}
+                                    onClick={() => { setPrompt(s); promptRef.current?.focus() }}
+                                    className="w-full max-w-md flex items-center justify-between px-4 py-3.5 rounded-2xl border border-gray-100 hover:border-gray-200 hover:bg-gray-50 transition-all text-left group"
+                                >
+                                    <span className="text-sm text-gray-600 group-hover:text-gray-900 transition-colors">{s}</span>
+                                    <ArrowRight className="h-3.5 w-3.5 text-gray-300 group-hover:text-gray-500 shrink-0 ml-3" />
+                                </button>
+                            ))}
                         </div>
 
                     ) : (
-                        <div className="space-y-8 max-w-2xl">
+                        <div className="space-y-7 max-w-xl">
 
-                            {/* Activity Steps */}
-                            {hasActivity && (
+                            {/* Today — active/done/error steps */}
+                            {todaySteps.length > 0 && (
                                 <div>
-                                    <p className="text-[9px] font-bold tracking-[0.25em] text-zinc-600 uppercase mb-5">Activity</p>
-                                    <div className="space-y-4">
-                                        {activitySteps.map((step, i) => (
-                                            <div key={i} className="flex items-center gap-4">
-                                                <div className="shrink-0 w-5">
-                                                    {step.status === 'done'    && <CheckCircle2 className="h-5 w-5 text-green-400" />}
-                                                    {step.status === 'active'  && <Loader2      className="h-5 w-5 text-yellow-400 animate-spin" />}
-                                                    {step.status === 'pending' && <Circle       className="h-5 w-5 text-zinc-800" />}
-                                                    {step.status === 'error'   && <XCircle      className="h-5 w-5 text-red-400" />}
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h3 className="text-sm font-semibold text-gray-800">Today</h3>
+                                        <MoreHorizontal className="h-4 w-4 text-gray-300" />
+                                    </div>
+                                    <div className="space-y-3.5">
+                                        {todaySteps.map((step, i) => (
+                                            <div key={i} className="flex items-center gap-3">
+                                                <div className="shrink-0 w-5 h-5 flex items-center justify-center">
+                                                    {step.status === 'done' && (
+                                                        <div className="h-5 w-5 rounded-full bg-teal-500 flex items-center justify-center">
+                                                            <CheckCircle2 className="h-3.5 w-3.5 text-white" strokeWidth={3} />
+                                                        </div>
+                                                    )}
+                                                    {step.status === 'active' && <Loader2 className="h-5 w-5 text-blue-500 animate-spin" />}
+                                                    {step.status === 'error' && (
+                                                        <div className="h-5 w-5 rounded-full bg-red-100 flex items-center justify-center">
+                                                            <XCircle className="h-3.5 w-3.5 text-red-500" />
+                                                        </div>
+                                                    )}
                                                 </div>
-                                                <span className={`flex-1 text-sm font-medium ${
-                                                    step.status === 'done'    ? 'text-zinc-500' :
-                                                    step.status === 'active'  ? 'text-white'    :
-                                                    step.status === 'error'   ? 'text-red-400'  : 'text-zinc-700'
-                                                }`}>
-                                                    {step.label}
-                                                </span>
-                                                <span className={`text-[9px] font-bold uppercase tracking-widest shrink-0 ${
-                                                    step.status === 'done'    ? 'text-green-500' :
-                                                    step.status === 'active'  ? 'text-yellow-400 animate-pulse' :
-                                                    step.status === 'error'   ? 'text-red-400'   : 'text-zinc-700'
-                                                }`}>
-                                                    {step.status === 'done'    ? 'Done'    :
-                                                     step.status === 'active'  ? 'Running' :
-                                                     step.status === 'error'   ? 'Failed'  : 'Waiting'}
-                                                </span>
+                                                <span className={`flex-1 text-sm ${
+                                                    step.status === 'done'   ? 'text-gray-500' :
+                                                    step.status === 'active' ? 'text-gray-900 font-medium' :
+                                                    'text-red-500'
+                                                }`}>{step.label}</span>
+                                                <Badge status={step.status} />
                                             </div>
                                         ))}
                                     </div>
                                 </div>
                             )}
 
-                            {/* Result Panel */}
+                            {/* Upcoming — pending steps */}
+                            {upcomingSteps.length > 0 && (
+                                <div>
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h3 className="text-sm font-semibold text-gray-800">Upcoming</h3>
+                                        <MoreHorizontal className="h-4 w-4 text-gray-300" />
+                                    </div>
+                                    <div className="space-y-3.5">
+                                        {upcomingSteps.map((step, i) => (
+                                            <div key={i} className="flex items-center gap-3">
+                                                <Circle className="h-5 w-5 text-gray-200 shrink-0" />
+                                                <span className="flex-1 text-sm text-gray-400">{step.label}</span>
+                                                <Badge status="pending" />
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Result */}
                             {selectedResult && (
                                 <div>
                                     <div className="flex items-center justify-between mb-4">
-                                        <p className="text-[9px] font-bold tracking-[0.25em] text-zinc-600 uppercase">Result</p>
+                                        <h3 className="text-sm font-semibold text-gray-800">Result</h3>
                                         <div className="flex items-center gap-2">
                                             {selectedResult.truncated && (
-                                                <span className="px-2 py-0.5 bg-yellow-500/10 text-yellow-400 text-[9px] font-bold uppercase tracking-widest rounded-lg">
-                                                    Truncated
-                                                </span>
+                                                <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full">Truncated</span>
                                             )}
-                                            <button
-                                                onClick={() => setSelectedResult(null)}
-                                                className="text-zinc-700 hover:text-zinc-400 transition-colors"
-                                            >
-                                                <X className="h-3.5 w-3.5" />
+                                            <button onClick={() => setSelectedResult(null)} className="text-gray-300 hover:text-gray-500 transition-colors">
+                                                <X className="h-4 w-4" />
                                             </button>
                                         </div>
                                     </div>
-                                    <div className={`rounded-2xl border overflow-hidden ${selectedResult.error ? 'border-red-500/20' : 'border-white/[0.06]'}`}>
-                                        <div className={`px-5 py-3 border-b flex items-center justify-between ${selectedResult.error ? 'bg-red-500/5 border-red-500/20' : 'bg-white/[0.02] border-white/[0.04]'}`}>
-                                            <span className="text-xs font-bold text-zinc-400 truncate">{selectedResult.name}</span>
-                                            <span className={`text-[9px] font-bold uppercase tracking-widest ml-3 shrink-0 ${selectedResult.error ? 'text-red-400' : 'text-green-400'}`}>
+                                    <div className={`rounded-2xl border overflow-hidden ${selectedResult.error ? 'border-red-100' : 'border-gray-100'}`}>
+                                        <div className={`px-5 py-3 border-b flex items-center justify-between ${selectedResult.error ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'}`}>
+                                            <span className="text-xs font-semibold text-gray-500 truncate">{selectedResult.name}</span>
+                                            <span className={`text-[10px] font-semibold px-2.5 py-1 rounded-full ml-2 shrink-0 ${selectedResult.error ? 'bg-red-100 text-red-500' : 'bg-emerald-50 text-emerald-600'}`}>
                                                 {selectedResult.error ? 'Failed' : 'Success'}
                                             </span>
                                         </div>
-                                        <div className="bg-black/50 p-5 max-h-[55vh] overflow-y-auto font-mono text-[11px] text-zinc-300 leading-relaxed whitespace-pre-wrap select-text">
+                                        <div className="bg-gray-50 p-5 max-h-[50vh] overflow-y-auto font-mono text-[11px] text-gray-600 leading-relaxed whitespace-pre-wrap select-text">
                                             {selectedResult.error
-                                                ? <span className="text-red-400">{selectedResult.error}</span>
+                                                ? <span className="text-red-500">{selectedResult.error}</span>
                                                 : typeof selectedResult.data === 'string'
                                                     ? selectedResult.data
                                                     : JSON.stringify(selectedResult.data, null, 2)
