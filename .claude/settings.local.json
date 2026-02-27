@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh -i \"$HOME/.ssh/g-force\" -o ConnectTimeout=10 -o StrictHostKeyChecking=no root@157.90.208.107 \"uname -a && uptime\")",
+      "Bash(ssh-keygen -R 157.90.208.107)",
+      "Bash(ssh -i \"$HOME/.ssh/g-force\" -o StrictHostKeyChecking=no root@157.90.208.107 \"echo CONNECTED && cat /etc/os-release | grep PRETTY\")",
+      "Bash(scp -i \"$HOME/.ssh/g-force\" -o StrictHostKeyChecking=no /c/Users/Free/g-force/scripts/server-init.sh root@157.90.208.107:/root/server-init.sh)",
+      "Bash(scp -i \"$HOME/.ssh/g-force\" -o StrictHostKeyChecking=no /c/Users/Free/g-force/scripts/setup-ssl.sh root@157.90.208.107:/root/setup-ssl.sh)",
+      "Bash(ssh -i \"$HOME/.ssh/g-force\" -o StrictHostKeyChecking=no root@157.90.208.107 \"chmod +x /root/server-init.sh /root/setup-ssl.sh && bash /root/server-init.sh gforce.local 2>&1\")",
+      "Bash(ssh -i \"$HOME/.ssh/g-force\" -o StrictHostKeyChecking=no root@157.90.208.107 \"which bash && bash --version | head -1\")",
+      "Bash(ssh -i \"$HOME/.ssh/g-force\" -o StrictHostKeyChecking=no root@157.90.208.107 \"/usr/bin/bash /root/server-init.sh gforce.local 2>&1\")",
+      "Bash(ssh -i \"$HOME/.ssh/g-force\" -o StrictHostKeyChecking=no root@157.90.208.107 \"sed -i ''s/\\\\r//'' /root/server-init.sh /root/setup-ssl.sh && echo FIXED\")",
+      "Bash(nslookup gforce.run 8.8.8.8)",
+      "Bash(ssh -i \"$HOME/.ssh/g-force\" -o StrictHostKeyChecking=no root@157.90.208.107 \"cd /opt/g-force && git pull && docker compose up -d --build 2>&1\")",
+      "Bash(ssh -i \"$HOME/.ssh/g-force\" -o StrictHostKeyChecking=no root@157.90.208.107 \":*)",
+      "Bash(ssh -i \"$HOME/.ssh/g-force\" -o StrictHostKeyChecking=no root@157.90.208.107 \"cd /opt/g-force && docker compose up -d --force-recreate app 2>&1\")",
+      "Bash(git add lib/automation/forge.ts app/api/telegram/webhook/route.ts)",
+      "Bash(git push origin main)"
+    ]
+  }
+}
