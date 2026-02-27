@@ -1,6 +1,11 @@
 {
   "version": 1,
   "skills": {
+    "apify-ultimate-scraper": {
+      "source": "apify/agent-skills",
+      "sourceType": "github",
+      "computedHash": "2893c31e3dfac0d760773791ea23fed933bed0148c38ddf15e53d6685bd27595"
+    },
     "find-skills": {
       "source": "vercel-labs/skills",
       "sourceType": "github",
@@ -10,6 +15,11 @@
       "source": "anthropics/skills",
       "sourceType": "github",
       "computedHash": "f08cbdec74dba480ec5217363446dae154b7576b8c3d9b4cb17aff234f15973b"
+    },
+    "reddit": {
+      "source": "resciencelab/opc-skills",
+      "sourceType": "github",
+      "computedHash": "4f9e4d58f831dbc74a60058a07b0240fb6d1cdc30f35225a7724e5de0e35822d"
     },
     "web-scraping": {
       "source": "jamditis/claude-skills-journalism",

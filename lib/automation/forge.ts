@@ -157,90 +157,86 @@ function extractJsonObjectCandidates(text: string): string[] {
     return out
 }
 
-function escapeControlCharsInJsonStrings(input: string): string {
-    let out = ''
+function repairJson(json: string): string {
+    let repaired = json.trim()
+
+    // 1. Handle unescaped newlines in strings (common Claude error)
+    // This finds a quote, then non-quote characters (including newlines), then a quote
+    // and replaces actual newlines with \n
+    repaired = repaired.replace(/"([^"]*)"/g, (match, p1) => {
+        return '"' + p1.replace(/\n/g, '\\n').replace(/\r/g, '\\r') + '"'
+    })
+
+    // 2. Close truncated JSON
+    let depth = 0
     let inString = false
     let escaped = false
-
-    for (let i = 0; i < input.length; i++) {
-        const ch = input[i]
-
+    for (let i = 0; i < repaired.length; i++) {
+        const ch = repaired[i]
         if (inString) {
-            if (escaped) {
-                out += ch
-                escaped = false
-                continue
-            }
-            if (ch === '\\') {
-                out += ch
-                escaped = true
-                continue
-            }
-            if (ch === '"') {
-                out += ch
-                inString = false
-                continue
-            }
-
-            const code = ch.charCodeAt(0)
-            if (code <= 0x1f) {
-                if (ch === '\n') out += '\\n'
-                else if (ch === '\r') out += '\\r'
-                else if (ch === '\t') out += '\\t'
-                else if (ch === '\b') out += '\\b'
-                else if (ch === '\f') out += '\\f'
-                else out += `\\u${code.toString(16).padStart(4, '0')}`
-                continue
-            }
-        } else if (ch === '"') {
-            inString = true
+            if (escaped) escaped = false
+            else if (ch === '\\') escaped = true
+            else if (ch === '"') inString = false
+        } else {
+            if (ch === '"') inString = true
+            else if (ch === '{') depth++
+            else if (ch === '}') depth--
         }
-
-        out += ch
     }
 
-    return out
+    if (inString) repaired += '"'
+    while (depth > 0) {
+        repaired += '}'
+        depth--
+    }
+
+    return repaired
 }
 
 function parseJsonObjectFromModel(response: string): any {
     const trimmed = response.replace(/^\uFEFF/, '').trim()
-    // Robustly find JSON blocks with or without labels
-    const jsonRegex = /```(?:json)?\s*([\s\S]*?)```/gi
-    const matches = Array.from(trimmed.matchAll(jsonRegex))
-    const fenced = matches.length > 0 ? matches.map(m => m[1].trim()) : []
-    const pools = fenced.length > 0 ? [...fenced, trimmed] : [trimmed]
 
+    // Attempt 1: Standard fenced block
+    const jsonRegex = /```(?:json)?\s*([\s\S]*?)```/gi
+    let matches = Array.from(trimmed.matchAll(jsonRegex))
+
+    // Attempt 2: If no fenced blocks, check for everything from the first { to the last }
+    if (matches.length === 0) {
+        const firstBrace = trimmed.indexOf('{')
+        const lastBrace = trimmed.lastIndexOf('}')
+        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+            matches = [[null, trimmed.slice(firstBrace, lastBrace + 1)]] as any
+        }
+    }
+
+    const pools = matches.length > 0 ? matches.map(m => m[1].trim()) : [trimmed]
     let bestCandidate: any = null
     let lastErr: Error | null = null
 
     for (const pool of pools) {
-        for (const candidate of extractJsonObjectCandidates(pool)) {
+        // Try raw first, then repair
+        const candidates = extractJsonObjectCandidates(pool)
+        for (const candidate of candidates) {
             try {
                 const parsed = JSON.parse(candidate)
-                if (parsed.executeBody || parsed.execute_body || parsed.code || parsed.script) {
-                    return parsed // Found the perfect one
-                }
+                if (parsed.executeBody || parsed.code) return parsed
                 if (!bestCandidate) bestCandidate = parsed
-            } catch (err) {
+            } catch {
                 try {
-                    const parsed = JSON.parse(escapeControlCharsInJsonStrings(candidate))
-                    if (parsed.executeBody || parsed.execute_body || parsed.code || parsed.script) {
-                        return parsed
-                    }
+                    const repaired = repairJson(candidate)
+                    const parsed = JSON.parse(repaired)
+                    if (parsed.executeBody || parsed.code) return parsed
                     if (!bestCandidate) bestCandidate = parsed
-                } catch (innerErr) {
-                    lastErr = innerErr as Error
+                } catch (err) {
+                    lastErr = err as Error
                 }
             }
         }
     }
 
     if (bestCandidate) return bestCandidate
-
-    if (!lastErr) {
-        throw new Error('No JSON found in Forge response')
-    }
-    throw lastErr
+    if (lastErr) throw lastErr
+    throw new Error('No valid JSON found in Forge response')
 }
 
 export class ForgeEngine {
@@ -284,7 +280,16 @@ Example:
 
         try {
             const response = await executeWithClaude(prompt, systemPrompt)
-            const data = parseJsonObjectFromModel(response)
+            let data: any
+            try {
+                data = parseJsonObjectFromModel(response)
+            } catch (err) {
+                console.error('[Forge] ❌ JSON Parsing Failed')
+                console.log('--- START RAW AI RESPONSE ---')
+                console.log(response)
+                console.log('--- END RAW AI RESPONSE ---')
+                throw err
+            }
 
             // Smarter field mapping with fallbacks
             const body = data.executeBody || data.execute_body || data.code || data.script
