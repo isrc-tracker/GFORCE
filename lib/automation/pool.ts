@@ -123,9 +123,11 @@ export class ContextPool {
      * Acquire a browser slot. Blocks when the pool is at capacity.
      * @param options Account usage or timeout
      */
-    async acquire(options?: string | { accountId?: string; timeoutMs?: number }): Promise<AcquiredSlot> {
-        const accountId = typeof options === 'string' ? options : options?.accountId;
-        const timeoutMs = (typeof options === 'object' ? options?.timeoutMs : undefined) ?? 30_000;
+    async acquire(options?: string | number | { accountId?: string; timeoutMs?: number }): Promise<AcquiredSlot> {
+        const accountId = typeof options === 'string' ? options : (typeof options === 'object' ? options?.accountId : undefined);
+        const timeoutMs = typeof options === 'number'
+            ? options
+            : (typeof options === 'object' ? options?.timeoutMs : undefined) ?? 30_000;
 
         let account = null;
         if (accountId) {
